@@ -12,6 +12,12 @@ It demonstrates three connected modules in one operator-facing app:
 - `No-Show Recovery` — a GHL-style booking and recovery workflow with owner routing and follow-up states
 - `Revenue Dashboard` — KPI tracking, Stripe-style payment outcomes, and Meta CAPI-ready server event naming
 
+It also includes operator surfaces for:
+
+- `Rule Lab` — editable automation logic with per-rule tests
+- `Connector Lab` — Zapier, Make, Stripe, GHL, Slack, and Google Sheets-style relay cards
+- `Operator Audit` — searchable execution history for webhook, rule, connector, and note actions
+
 The app also includes guided operator scenarios and a live simulator layer so the demo can be driven like a real workflow:
 
 - hot DM to checkout

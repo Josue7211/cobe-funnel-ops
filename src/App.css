@@ -465,6 +465,132 @@
   filter: saturate(0.8);
 }
 
+.connector-grid,
+.audit-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.connector-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.connector-card,
+.audit-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1rem;
+  background: var(--surface-alt);
+}
+
+.connector-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.connector-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.connector-status,
+.audit-webhook,
+.audit-rule,
+.audit-connector,
+.audit-note,
+.audit-scenario {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.connector-status {
+  background: rgba(51, 129, 84, 0.15);
+  color: #2f7249;
+}
+
+.connector-ready {
+  background: rgba(51, 129, 84, 0.15);
+  color: #2f7249;
+}
+
+.connector-syncing {
+  background: rgba(44, 113, 246, 0.12);
+  color: #264eaa;
+}
+
+.connector-attention {
+  background: rgba(190, 76, 41, 0.14);
+  color: #a03d1f;
+}
+
+.connector-note {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.audit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.audit-search,
+.audit-select {
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-main);
+  padding: 0 1rem;
+  font: inherit;
+}
+
+.audit-search {
+  flex: 1 1 280px;
+}
+
+.audit-select {
+  flex: 0 0 180px;
+}
+
+.audit-card .event-status {
+  background: rgba(24, 39, 84, 0.12);
+  color: var(--accent-deep);
+}
+
+.audit-webhook {
+  background: rgba(44, 113, 246, 0.12);
+  color: #264eaa;
+}
+
+.audit-rule {
+  background: rgba(51, 129, 84, 0.15);
+  color: #2f7249;
+}
+
+.audit-connector {
+  background: rgba(255, 143, 77, 0.16);
+  color: #a95526;
+}
+
+.audit-note {
+  background: rgba(87, 95, 112, 0.14);
+  color: #4a5161;
+}
+
+.audit-scenario {
+  background: rgba(24, 39, 84, 0.12);
+  color: var(--accent-deep);
+}
+
 .booking-card {
   border: 1px solid var(--border);
   background: var(--surface-alt);
@@ -663,6 +789,7 @@
   .simulator-grid,
   .funnel-layout,
   .dashboard-layout,
+  .connector-grid,
   .stats-grid,
   .module-strip,
   .scenario-strip {

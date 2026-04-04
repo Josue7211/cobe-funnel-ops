@@ -392,3 +392,41 @@ export const integrationFit = [
   { name: 'Meta CAPI', fit: 'Modeled with server-event naming, match keys, and payload readiness.' },
   { name: 'Client onboarding', fit: 'Covered through the payment-to-onboarding autopilot scenario.' },
 ]
+
+export const automationConnectors = [
+  {
+    name: 'Zapier',
+    category: 'Automation relay',
+    use: 'Route qualified leads and pass state into downstream workflows.',
+  },
+  {
+    name: 'Make',
+    category: 'Scenario orchestration',
+    use: 'Model multi-step branches, retries, and delayed follow-up sequences.',
+  },
+  {
+    name: 'Meta CAPI',
+    category: 'Server events',
+    use: 'Validate payload names and match keys before handing off to ads reporting.',
+  },
+  {
+    name: 'GHL',
+    category: 'CRM + routing',
+    use: 'Mirror pipeline stages, owner assignment, reminders, and no-show recovery.',
+  },
+  {
+    name: 'Stripe',
+    category: 'Payments',
+    use: 'Emit checkout and purchase events that update the funnel state.',
+  },
+  {
+    name: 'Slack',
+    category: 'Team alerts',
+    use: 'Notify the team when a hot lead or exception needs human attention.',
+  },
+  {
+    name: 'Google Sheets',
+    category: 'Reporting',
+    use: 'Log daily metrics and keep a low-friction source of truth for the team.',
+  },
+]

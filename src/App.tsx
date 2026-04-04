@@ -2,6 +2,7 @@ import { startTransition, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
   automationRules,
+  automationConnectors,
   bookings,
   capiEvents,
   conversations,
@@ -57,6 +58,66 @@ type OperatorNote = {
 type WebhookValidation =
   | { ok: true; parsed: Record<string, unknown>; label: string }
   | { ok: false; message: string }
+
+type ConnectorStatus = 'ready' | 'syncing' | 'attention'
+
+type ConnectorState = {
+  status: ConnectorStatus
+  lastPing: string
+  runs: number
+  note: string
+}
+
+type AuditKind = 'webhook' | 'rule' | 'connector' | 'note' | 'scenario'
+
+type AuditEvent = {
+  id: string
+  kind: AuditKind
+  title: string
+  detail: string
+  target: string
+  timestamp: string
+}
+
+const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
+  (accumulator, connector) => {
+    accumulator[connector.name] = {
+      status: 'ready',
+      lastPing: 'just now',
+      runs: 0,
+      note: `${connector.name} is staged for the next relay.`,
+    }
+    return accumulator
+  },
+  {},
+)
+
+const initialAuditEvents: AuditEvent[] = [
+  {
+    id: 'aud-001',
+    kind: 'webhook',
+    title: 'Webhook validated',
+    detail: 'Stripe checkout event passed schema checks and was queued for relay.',
+    target: 'Stripe',
+    timestamp: '09:15:11',
+  },
+  {
+    id: 'aud-002',
+    kind: 'rule',
+    title: 'Rule test passed',
+    detail: 'Keyword trigger matched the hot DM transcript and queued the checkout branch.',
+    target: 'rule-001',
+    timestamp: '09:16:02',
+  },
+  {
+    id: 'aud-003',
+    kind: 'connector',
+    title: 'Meta CAPI connector ready',
+    detail: 'Server-event naming and match keys are ready for the next export.',
+    target: 'Meta CAPI',
+    timestamp: '09:17:44',
+  },
+]
 
 const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   'scenario-001': {
@@ -210,8 +271,18 @@ function App() {
   const [ruleDrafts, setRuleDrafts] = useState<RuleDraft[]>(
     Array.isArray(persisted?.ruleDrafts) ? persisted.ruleDrafts : defaultRuleDrafts,
   )
+  const [connectorStates, setConnectorStates] = useState<Record<string, ConnectorState>>(
+    persisted?.connectorStates && typeof persisted.connectorStates === 'object'
+      ? persisted.connectorStates
+      : defaultConnectorStates,
+  )
   const [operatorNotesHistory, setOperatorNotesHistory] = useState<OperatorNote[]>(
     Array.isArray(persisted?.operatorNotesHistory) ? persisted.operatorNotesHistory : [],
+  )
+  const [auditQuery, setAuditQuery] = useState('')
+  const [auditKindFilter, setAuditKindFilter] = useState<'all' | AuditKind>('all')
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(
+    Array.isArray(persisted?.auditEvents) ? persisted.auditEvents : initialAuditEvents,
   )
   const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>(
     persisted?.ruleTestResults && typeof persisted.ruleTestResults === 'object'
@@ -255,13 +326,17 @@ function App() {
         operatorNotes,
         webhookHistory,
         ruleDrafts,
+        connectorStates,
         operatorNotesHistory,
+        auditEvents,
         ruleTestResults,
       }),
     )
   }, [
     operatorNotes,
+    auditEvents,
     operatorNotesHistory,
+    connectorStates,
     ruleDrafts,
     ruleTestResults,
     scenarioId,
@@ -269,6 +344,37 @@ function App() {
     stepIndex,
     webhookHistory,
   ])
+
+  const appendAuditEvent = (
+    event: Omit<AuditEvent, 'id' | 'timestamp'>,
+    timestamp = new Date().toISOString(),
+  ) => {
+    setAuditEvents((current) => [
+      {
+        id: `aud-${String(current.length + 1).padStart(3, '0')}`,
+        timestamp,
+        ...event,
+      },
+      ...current,
+    ])
+  }
+
+  const updateConnectorState = (name: string, patch: Partial<ConnectorState>) => {
+    setConnectorStates((current) => {
+      const existing = current[name] ?? defaultConnectorStates[name]
+      if (!existing) {
+        return current
+      }
+
+      return {
+        ...current,
+        [name]: {
+          ...existing,
+          ...patch,
+        },
+      }
+    })
+  }
 
   const handleScenarioChange = (nextScenarioId: string) => {
     const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
@@ -280,6 +386,12 @@ function App() {
       setWebhookInput(JSON.stringify(nextRuntime.payloads[0], null, 2))
       setWebhookResult(null)
     })
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Scenario switched',
+      detail: `Opened ${nextScenario.title} and reset the simulator to step one.`,
+      target: nextScenario.id,
+    })
   }
 
   const handleStepChange = (nextStepIndex: number) => {
@@ -287,6 +399,12 @@ function App() {
     setStepIndex(boundedStep)
     setWebhookInput(JSON.stringify(runtime.payloads[boundedStep], null, 2))
     setWebhookResult(null)
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Workflow step advanced',
+      detail: `Moved to ${runtime.stepLabels[boundedStep]} for ${activeScenario.title}.`,
+      target: activeScenario.id,
+    })
   }
 
   const validateWebhookPayload = (raw: string): WebhookValidation => {
@@ -337,6 +455,12 @@ function App() {
       },
       ...current,
     ])
+    appendAuditEvent({
+      kind: 'webhook',
+      title: 'Webhook validated',
+      detail: `Accepted payload labeled ${result.label} and added it to the inbox.`,
+      target: result.label,
+    })
   }
 
   const handleWebhookReplay = (item: WebhookEvent) => {
@@ -361,6 +485,12 @@ function App() {
       },
       ...current,
     ])
+    appendAuditEvent({
+      kind: 'webhook',
+      title: 'Webhook replayed',
+      detail: `Replayed ${item.label} and queued the payload back into the simulator.`,
+      target: item.id,
+    })
   }
 
   const updateRuleDraft = (ruleId: string, patch: Partial<RuleDraft>) => {
@@ -428,6 +558,12 @@ function App() {
       ...current,
       [ruleId]: result,
     }))
+    appendAuditEvent({
+      kind: 'rule',
+      title: `Rule test ${result.status}`,
+      detail: result.detail,
+      target: ruleId,
+    })
   }
 
   const handleLogNote = () => {
@@ -444,6 +580,35 @@ function App() {
       stepLabel: runtime.stepLabels[stepIndex],
     }
     setOperatorNotesHistory((current) => [entry, ...current])
+    appendAuditEvent({
+      kind: 'note',
+      title: 'Operator note logged',
+      detail: trimmed,
+      target: activeScenario.id,
+    })
+  }
+
+  const handleConnectorPing = (connectorName: string) => {
+    const current = connectorStates[connectorName] ?? defaultConnectorStates[connectorName]
+    if (!current) {
+      return
+    }
+
+    const nextStatus: ConnectorStatus = 'ready'
+    const timestamp = new Date().toISOString()
+
+    updateConnectorState(connectorName, {
+      status: nextStatus,
+      lastPing: timestamp,
+      runs: current.runs + 1,
+      note: `${connectorName} checked, payload routing is healthy.`,
+    })
+    appendAuditEvent({
+      kind: 'connector',
+      title: `${connectorName} pinged`,
+      detail: 'Connector health check completed and the relay path is ready.',
+      target: connectorName,
+    })
   }
 
   const handleExport = () => {
@@ -466,7 +631,9 @@ function App() {
       notesHistory: operatorNotesHistory,
       webhookHistory,
       ruleDrafts,
+      connectorStates,
       ruleTestResults,
+      auditEvents,
       metrics: revenueMetrics,
       capiEvents,
     }
@@ -812,6 +979,47 @@ function App() {
         <section className="panel">
           <div className="panel-header">
             <div>
+              <p className="panel-kicker">Connector Lab</p>
+              <h2>Automation relay matrix</h2>
+            </div>
+            <span className="status-pill">Zapier + Make + Meta CAPI</span>
+          </div>
+          <div className="connector-grid">
+            {automationConnectors.map((connector) => {
+              const state = connectorStates[connector.name] ?? defaultConnectorStates[connector.name]
+
+              return (
+                <article key={connector.name} className="connector-card">
+                  <div className="connector-topline">
+                    <div>
+                      <p className="mini-label">{connector.category}</p>
+                      <h3>{connector.name}</h3>
+                    </div>
+                    <span className={`connector-status connector-${state?.status ?? 'ready'}`}>
+                      {state?.status ?? 'ready'}
+                    </span>
+                  </div>
+                  <p>{connector.use}</p>
+                  <p className="timeline-meta">
+                    Last ping: {state?.lastPing ?? 'just now'} • Runs: {state?.runs ?? 0}
+                  </p>
+                  <p className="connector-note">{state?.note ?? 'Ready for the next relay.'}</p>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleConnectorPing(connector.name)}
+                  >
+                    Ping connector
+                  </button>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
               <p className="panel-kicker">Webhook Inspector</p>
               <h2>Current payload</h2>
             </div>
@@ -883,6 +1091,59 @@ function App() {
                 </div>
               </article>
             ))}
+          </div>
+        </section>
+
+        <section className="panel panel-wide">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Operator Audit</p>
+              <h2>Execution history</h2>
+            </div>
+            <span className="status-pill">{auditEvents.length} records</span>
+          </div>
+          <div className="audit-toolbar">
+            <input
+              className="audit-search"
+              type="search"
+              value={auditQuery}
+              onChange={(event) => setAuditQuery(event.target.value)}
+              placeholder="Search rules, connectors, webhooks, notes, or scenario IDs"
+            />
+            <select
+              className="audit-select"
+              value={auditKindFilter}
+              onChange={(event) => setAuditKindFilter(event.target.value as 'all' | AuditKind)}
+            >
+              <option value="all">All events</option>
+              <option value="scenario">Scenario</option>
+              <option value="webhook">Webhook</option>
+              <option value="rule">Rule</option>
+              <option value="connector">Connector</option>
+              <option value="note">Note</option>
+            </select>
+          </div>
+          <div className="audit-list">
+            {auditEvents
+              .filter((entry) => (auditKindFilter === 'all' ? true : entry.kind === auditKindFilter))
+              .filter((entry) => {
+                const haystack = `${entry.title} ${entry.detail} ${entry.target} ${entry.timestamp}`.toLowerCase()
+                return haystack.includes(auditQuery.toLowerCase())
+              })
+              .map((entry) => (
+                <article key={entry.id} className="audit-card">
+                  <div className="booking-topline">
+                    <div>
+                      <p className="event-name">{entry.title}</p>
+                      <p className="timeline-meta">
+                        {entry.target} • {entry.timestamp}
+                      </p>
+                    </div>
+                    <span className={`event-status audit-${entry.kind}`}>{entry.kind}</span>
+                  </div>
+                  <p>{entry.detail}</p>
+                </article>
+              ))}
           </div>
         </section>
 
