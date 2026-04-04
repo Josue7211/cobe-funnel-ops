@@ -100,6 +100,10 @@ type DeliveryItem = {
   note: string
 }
 
+type WorkbenchTab = 'funnel' | 'recovery' | 'payload'
+
+type RailTab = 'operations' | 'audit' | 'automation' | 'metrics'
+
 const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
   (accumulator, connector) => {
     accumulator[connector.name] = {
@@ -345,7 +349,7 @@ function App() {
   const [webhookHistory, setWebhookHistory] = useState<WebhookEvent[]>(
     Array.isArray(persisted?.webhookHistory) ? persisted.webhookHistory : defaultWebhookHistory,
   )
-  const [ruleDrafts, setRuleDrafts] = useState<RuleDraft[]>(
+  const [ruleDrafts] = useState<RuleDraft[]>(
     Array.isArray(persisted?.ruleDrafts) ? persisted.ruleDrafts : defaultRuleDrafts,
   )
   const [connectorStates, setConnectorStates] = useState<Record<string, ConnectorState>>(
@@ -370,6 +374,8 @@ function App() {
     status: 'accepted' | 'rejected'
     message: string
   } | null>(null)
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('funnel')
+  const [railTab, setRailTab] = useState<RailTab>('operations')
 
   const activeScenario = useMemo(
     () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
@@ -398,6 +404,26 @@ function App() {
   const filteredDeliveryQueue = deliveryQueue.filter((item) =>
     deliveryFilter === 'all' ? true : item.status === deliveryFilter,
   )
+  const leadScenarios = useMemo(
+    () =>
+      demoScenarios.reduce<Record<string, string>>((accumulator, scenario) => {
+        accumulator[scenario.leadId] = scenario.id
+        return accumulator
+      }, {}),
+    [],
+  )
+  const activeLeadQueue = filteredDeliveryQueue.filter((item) => item.target === activeLead.handle)
+  const activeLeadTimeline = eventLog.filter((entry) => entry.leadId === activeLead.id)
+  const activeLeadAudit = auditEvents.filter((entry) =>
+    `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.id) ||
+    `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.handle.toLowerCase()),
+  )
+  const visibleAuditEvents = auditEvents
+    .filter((entry) => (auditKindFilter === 'all' ? true : entry.kind === auditKindFilter))
+    .filter((entry) => {
+      const haystack = `${entry.title} ${entry.detail} ${entry.target} ${entry.timestamp}`.toLowerCase()
+      return haystack.includes(auditQuery.toLowerCase())
+    })
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -674,12 +700,6 @@ function App() {
       detail: `Replayed ${item.label} and queued the payload back into the simulator.`,
       target: item.id,
     })
-  }
-
-  const updateRuleDraft = (ruleId: string, patch: Partial<RuleDraft>) => {
-    setRuleDrafts((current) =>
-      current.map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
-    )
   }
 
   const evaluateRule = (rule: RuleDraft): RuleTestResult => {
@@ -1036,243 +1056,34 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="hero-panel">
-        <div className="hero-copy">
+      <header className="mission-topbar">
+        <div>
           <p className="eyebrow">Creator Funnel Ops</p>
-          <h1>Live operator simulator for funnels, recovery, and reporting.</h1>
+          <h1>Mission Control</h1>
           <p className="hero-text">
-            This is no longer just a static concept. You can drive the funnel step by step, watch
-            stages change, inspect emitted payloads, and show how manual ops work gets replaced.
+            Handle active leads, run automations, inspect payloads, and recover revenue from one
+            operator surface.
           </p>
-          <div className="hero-actions">
-            <a href="#simulator" className="button button-primary">
-              Run the simulator
-            </a>
-            <a href="#dashboard" className="button button-secondary">
-              Inspect metrics
-            </a>
-          </div>
         </div>
-        <div className="hero-card">
-          <div className="hero-card-header">
-            <span>Current path</span>
-            <span>{stepIndex + 1}/{runtime.stepLabels.length}</span>
-          </div>
-          <h3>{activeScenario.title}</h3>
-          <p>{activeScenario.outcome}</p>
-          <div className="progress-wrap">
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${progress}%` }} />
-            </div>
-            <p className="mini-label">{runtime.stepLabels[stepIndex]}</p>
-          </div>
+        <div className="topbar-metrics">
+          {summaryStats.map((stat) => (
+            <article key={stat.label} className="topbar-metric">
+              <p className="stat-label">{stat.label}</p>
+              <p className="topbar-value">{stat.value}</p>
+              <p className="stat-note">{stat.note}</p>
+            </article>
+          ))}
         </div>
       </header>
 
-      <section className="stats-grid">
-        {summaryStats.map((stat) => (
-          <article key={stat.label} className="stat-card">
-            <p className="stat-label">{stat.label}</p>
-            <p className="stat-value">{stat.value}</p>
-            <p className="stat-note">{stat.note}</p>
-          </article>
-        ))}
-      </section>
-
-      <section className="module-strip">
-        {repoModules.map((module) => (
-          <article key={module.name} className="module-card">
-            <p className="module-name">{module.name}</p>
-            <p>{module.summary}</p>
-          </article>
-        ))}
-      </section>
-
-      <section id="simulator" className="scenario-strip">
-        {demoScenarios.map((scenario) => (
-          <article
-            key={scenario.id}
-            className={`scenario-card ${scenario.id === activeScenario.id ? 'scenario-card-active' : ''}`}
-          >
-            <div className="scenario-header">
-              <div>
-                <p className="module-name">Demo path</p>
-                <h2>{scenario.title}</h2>
-              </div>
-              <button
-                type="button"
-                className="button button-secondary button-small"
-                onClick={() => handleScenarioChange(scenario.id)}
-              >
-                {scenario.id === activeScenario.id ? 'Selected' : 'Open path'}
-              </button>
-            </div>
-            <p className="scenario-outcome">{scenario.outcome}</p>
-            <ol className="scenario-steps">
-              {scenario.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-            <div className="scenario-impact">
-              <div>
-                <p className="mini-label">Hours saved</p>
-                <p>{scenario.hoursSaved}</p>
-              </div>
-              <div>
-                <p className="mini-label">Revenue angle</p>
-                <p>{scenario.revenueAngle}</p>
-              </div>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <main className="workspace">
-        <section className="panel panel-wide">
+      <main className="mission-control">
+        <aside className="panel mission-sidebar">
           <div className="panel-header">
             <div>
-              <p className="panel-kicker">Simulation Controls</p>
-              <h2>Drive the workflow</h2>
+              <p className="panel-kicker">Queue</p>
+              <h2>Lead inbox</h2>
             </div>
-            <span className="status-pill">Operator mode</span>
-          </div>
-          <div className="simulator-grid">
-            <article className="simulator-card">
-              <p className="mini-label">Current step</p>
-              <h3>{runtime.stepLabels[stepIndex]}</h3>
-              <p>{activeScenario.steps[stepIndex]}</p>
-              <div className="control-row">
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={() => handleStepChange(stepIndex - 1)}
-                  disabled={stepIndex === 0}
-                >
-                  Previous step
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary button-small"
-                  onClick={() => handleStepChange(stepIndex + 1)}
-                  disabled={stepIndex === runtime.stepLabels.length - 1}
-                >
-                  Advance flow
-                </button>
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={handleExport}
-                >
-                  Export proof
-                </button>
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={() => handleStepChange(0)}
-                >
-                  Reset
-                </button>
-              </div>
-            </article>
-            <article className="simulator-card">
-              <p className="mini-label">{runtime.metricLabel}</p>
-              <p className="metric-value">{activeMetricValue}</p>
-              <p className="stat-note">
-                This panel is here to keep the narration business-facing while you click through
-                the scenario.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section id="dm-funnel" className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Module 1</p>
-              <h2>DM Sprint Funnel</h2>
-            </div>
-            <span className="status-pill">ManyChat-style automation</span>
-          </div>
-          <div className="funnel-layout">
-            <article className="inbox-card">
-              <div className="inbox-header">
-                <div>
-                  <p className="mini-label">Selected conversation</p>
-                  <h3>{activeLead.name}</h3>
-                </div>
-                <div className="score-badge">{activeConversation.score} intent score</div>
-              </div>
-              <div className="message-stack">
-                {visibleMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`message-bubble ${
-                      message.sender === 'bot' ? 'message-bot' : 'message-lead'
-                    }`}
-                  >
-                    <span>{message.text}</span>
-                    <small>{message.timestamp}</small>
-                  </div>
-                ))}
-              </div>
-              <div className="automation-summary">
-                <p className="mini-label">Automation result</p>
-                <p>{activeConversation.automationSummary}</p>
-              </div>
-            </article>
-
-            <article className="lead-card">
-              <div className="lead-header">
-                <div>
-                  <p className="mini-label">Lead profile</p>
-                  <h3>{activeLead.handle}</h3>
-                </div>
-                <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
-              </div>
-              <dl className="detail-grid">
-                <div>
-                  <dt>Offer</dt>
-                  <dd>{activeLead.offer}</dd>
-                </div>
-                <div>
-                  <dt>Source</dt>
-                  <dd>{activeLead.source}</dd>
-                </div>
-                <div>
-                  <dt>Owner</dt>
-                  <dd>{activeLead.owner}</dd>
-                </div>
-                <div>
-                  <dt>Next action</dt>
-                  <dd>{activeLead.nextAction}</dd>
-                </div>
-                <div>
-                  <dt>Budget</dt>
-                  <dd>{activeLead.budget}</dd>
-                </div>
-                <div>
-                  <dt>Last touch</dt>
-                  <dd>{activeLead.lastTouch}</dd>
-                </div>
-              </dl>
-              <div className="tag-row">
-                {activeLead.tags.map((tag) => (
-                  <span key={tag} className="tag">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Ops Queue</p>
-              <h2>Live lead operations</h2>
-            </div>
-            <span className="status-pill">{filteredLeads.length} visible leads</span>
+            <span className="status-pill">{filteredLeads.length} visible</span>
           </div>
           <div className="audit-toolbar">
             <input
@@ -1297,21 +1108,196 @@ function App() {
               <option value="won">Won</option>
             </select>
           </div>
-          <div className="ops-grid">
-            {filteredLeads.map((lead) => (
-              <article key={lead.id} className="ops-card">
+          <div className="lead-queue">
+            {filteredLeads.map((lead) => {
+              const scenarioForLead = leadScenarios[lead.id]
+              const isActive = lead.id === activeLead.id
+
+              return (
+                <button
+                  key={lead.id}
+                  type="button"
+                  className={`lead-queue-item ${isActive ? 'lead-queue-item-active' : ''}`}
+                  onClick={() => {
+                    if (scenarioForLead) {
+                      handleScenarioChange(scenarioForLead)
+                    }
+                  }}
+                >
+                  <div className="lead-queue-topline">
+                    <div>
+                      <p className="mini-label">{lead.source}</p>
+                      <strong>{lead.name}</strong>
+                    </div>
+                    <span className="stage-badge">{lead.stage}</span>
+                  </div>
+                  <p className="timeline-meta">{lead.handle} • {lead.offer}</p>
+                  <p className="lead-queue-note">{lead.nextAction}</p>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <section className="panel mission-main">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Active Session</p>
+              <h2>{activeScenario.title}</h2>
+              <p className="stat-note">{activeScenario.outcome}</p>
+            </div>
+            <span className="status-pill">
+              Step {stepIndex + 1}/{runtime.stepLabels.length}
+            </span>
+          </div>
+
+          <div className="mission-summary">
+            <article className="mission-highlight">
+              <p className="mini-label">Current step</p>
+              <h3>{runtime.stepLabels[stepIndex]}</h3>
+              <p>{activeScenario.steps[stepIndex]}</p>
+            </article>
+            <article className="mission-highlight">
+              <p className="mini-label">{runtime.metricLabel}</p>
+              <p className="metric-value">{activeMetricValue}</p>
+              <p className="stat-note">{activeScenario.revenueAngle}</p>
+            </article>
+            <article className="mission-highlight">
+              <p className="mini-label">Operator target</p>
+              <h3>{activeLead.handle}</h3>
+              <p>{activeLead.nextAction}</p>
+            </article>
+          </div>
+
+          <div className="progress-wrap mission-progress">
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="mini-label">Workflow progress</p>
+          </div>
+
+          <div className="command-row">
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => handleStepChange(stepIndex - 1)}
+              disabled={stepIndex === 0}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={() => handleStepChange(stepIndex + 1)}
+              disabled={stepIndex === runtime.stepLabels.length - 1}
+            >
+              Advance flow
+            </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => handleStepChange(0)}
+            >
+              Reset flow
+            </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleExport}
+            >
+              Export proof
+            </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleLogNote}
+            >
+              Log note
+            </button>
+          </div>
+
+          <div className="tab-row">
+            {[
+              ['funnel', 'DM workbench'],
+              ['recovery', 'Recovery'],
+              ['payload', 'Payloads'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`tab-button ${workbenchTab === value ? 'tab-button-active' : ''}`}
+                onClick={() => setWorkbenchTab(value as WorkbenchTab)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {workbenchTab === 'funnel' ? (
+            <div className="workbench-grid">
+              <article className="inbox-card">
+                <div className="inbox-header">
+                  <div>
+                    <p className="mini-label">Conversation</p>
+                    <h3>{activeLead.name}</h3>
+                  </div>
+                  <div className="score-badge">{activeConversation.score} intent score</div>
+                </div>
+                <div className="message-stack">
+                  {visibleMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`message-bubble ${
+                        message.sender === 'bot' ? 'message-bot' : 'message-lead'
+                      }`}
+                    >
+                      <span>{message.text}</span>
+                      <small>{message.timestamp}</small>
+                    </div>
+                  ))}
+                </div>
+                <div className="automation-summary">
+                  <p className="mini-label">Automation result</p>
+                  <p>{activeConversation.automationSummary}</p>
+                </div>
+              </article>
+
+              <article className="lead-card">
                 <div className="lead-header">
                   <div>
-                    <p className="mini-label">{lead.source}</p>
-                    <h3>{lead.name}</h3>
-                    <p className="timeline-meta">{lead.handle} • {lead.offer}</p>
+                    <p className="mini-label">Lead profile</p>
+                    <h3>{activeLead.handle}</h3>
                   </div>
-                  <span className="stage-badge">{lead.stage}</span>
+                  <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
                 </div>
-                <p className="booking-owner">Owner: {lead.owner}</p>
-                <p>{lead.nextAction}</p>
+                <dl className="detail-grid">
+                  <div>
+                    <dt>Offer</dt>
+                    <dd>{activeLead.offer}</dd>
+                  </div>
+                  <div>
+                    <dt>Source</dt>
+                    <dd>{activeLead.source}</dd>
+                  </div>
+                  <div>
+                    <dt>Owner</dt>
+                    <dd>{activeLead.owner}</dd>
+                  </div>
+                  <div>
+                    <dt>Budget</dt>
+                    <dd>{activeLead.budget}</dd>
+                  </div>
+                  <div>
+                    <dt>Last touch</dt>
+                    <dd>{activeLead.lastTouch}</dd>
+                  </div>
+                  <div>
+                    <dt>Hours saved</dt>
+                    <dd>{activeScenario.hoursSaved}</dd>
+                  </div>
+                </dl>
                 <div className="tag-row">
-                  {lead.tags.map((tag) => (
+                  {activeLead.tags.map((tag) => (
                     <span key={tag} className="tag">
                       {tag}
                     </span>
@@ -1321,547 +1307,472 @@ function App() {
                   <button
                     type="button"
                     className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('checkout', lead.id)}
+                    onClick={() => handleLeadAction('checkout', activeLead.id)}
                   >
                     Queue checkout
                   </button>
                   <button
                     type="button"
                     className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('route', lead.id)}
+                    onClick={() => handleLeadAction('route', activeLead.id)}
                   >
                     Route closer
                   </button>
                   <button
                     type="button"
                     className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('no-show', lead.id)}
+                    onClick={() => handleLeadAction('no-show', activeLead.id)}
                   >
                     Mark no-show
                   </button>
                   <button
                     type="button"
                     className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('recover', lead.id)}
+                    onClick={() => handleLeadAction('recover', activeLead.id)}
                   >
                     Recover
                   </button>
                   <button
                     type="button"
                     className="button button-primary button-small"
-                    onClick={() => handleLeadAction('alert', lead.id)}
+                    onClick={() => handleLeadAction('alert', activeLead.id)}
                   >
                     Send alert
                   </button>
                 </div>
               </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Rule Lab</p>
-              <h2>Automation Logic</h2>
             </div>
-            <span className="status-pill">Editable + testable</span>
-          </div>
-          <div className="rule-stack">
-            {ruleDrafts.map((rule) => {
-              const sourceRule = automationRules.find((entry) => entry.id === rule.id)
-              const result = ruleTestResults[rule.id]
+          ) : null}
 
-              return (
-                <article
-                  key={rule.id}
-                  className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}
+          {workbenchTab === 'recovery' ? (
+            <div className="workbench-grid">
+              <article className="booking-card booking-highlight">
+                <div className="booking-topline">
+                  <div>
+                    <p className="mini-label">Call state</p>
+                    <h3>{activeLead.name}</h3>
+                    <p>{activeBooking?.slot ?? 'No call slot required'}</p>
+                  </div>
+                  <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
+                    {runtime.bookingStatuses[stepIndex]}
+                  </span>
+                </div>
+                <p className="booking-owner">Closer: {activeLead.owner}</p>
+                <p>
+                  {activeBooking?.recoveryAction ??
+                    'Payment path skips call handling and moves directly into onboarding automation.'}
+                </p>
+                <div className="timeline-stack">
+                  {activeLeadTimeline.map((entry) => (
+                    <article key={entry.id} className="timeline-card">
+                      <div className="booking-topline">
+                        <p className="event-name">{entry.event}</p>
+                        <span className={`event-status event-${entry.status}`}>{entry.status}</span>
+                      </div>
+                      <p>{entry.detail}</p>
+                      <p className="timeline-meta">
+                        {entry.channel} • {entry.timestamp}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
+              <article className="panel-tight recovery-actions-card">
+                <div className="subsection-header">
+                  <h3>Recovery playbook</h3>
+                  <span className="mini-label">GHL-style branch</span>
+                </div>
+                <ol className="scenario-steps">
+                  {activeScenario.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                <div className="tag-row">
+                  {scenarioEvents.map((entry) => (
+                    <span key={entry.id} className="tag">
+                      {entry.event}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            </div>
+          ) : null}
+
+          {workbenchTab === 'payload' ? (
+            <div className="payload-workbench">
+              <div className="payload-controls">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setWebhookInput(JSON.stringify(activePayload, null, 2))}
                 >
-                  <div className="rule-header">
+                  Reset to template
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleWebhookValidate}
+                >
+                  Validate payload
+                </button>
+              </div>
+              <textarea
+                className="payload-editor"
+                value={webhookInput}
+                onChange={(event) => setWebhookInput(event.target.value)}
+                spellCheck={false}
+              />
+              {webhookResult ? (
+                <p
+                  className={`webhook-result ${
+                    webhookResult.status === 'accepted' ? 'webhook-accepted' : 'webhook-rejected'
+                  }`}
+                >
+                  {webhookResult.message}
+                </p>
+              ) : null}
+              <div className="webhook-history">
+                <div className="subsection-header">
+                  <h3>Webhook inbox</h3>
+                  <span className="mini-label">{webhookHistory.length} events</span>
+                </div>
+                {webhookHistory.map((item) => (
+                  <article key={item.id} className="webhook-item">
                     <div>
-                      <p className="mini-label">{sourceRule?.system}</p>
-                      <h3>{rule.trigger}</h3>
+                      <span>{item.label}</span>
+                      <small>{item.id}</small>
                     </div>
                     <div className="control-row">
                       <button
                         type="button"
                         className="button button-secondary button-small"
-                        onClick={() => handleRuleTest(rule.id)}
+                        onClick={() => {
+                          setWebhookInput(item.payload)
+                          setWebhookResult({
+                            status: 'accepted',
+                            message: `Loaded ${item.label} from webhook inbox.`,
+                          })
+                        }}
                       >
-                        Run test
+                        Load
                       </button>
-                      <label className="toggle">
-                        <input
-                          type="checkbox"
-                          checked={rule.enabled}
-                          onChange={(event) =>
-                            updateRuleDraft(rule.id, { enabled: event.target.checked })
-                          }
-                        />
-                        <span>Enabled</span>
-                      </label>
+                      <button
+                        type="button"
+                        className="button button-primary button-small"
+                        onClick={() => handleWebhookReplay(item)}
+                      >
+                        Replay
+                      </button>
                     </div>
-                  </div>
-                  <label className="field-label">
-                    Trigger
-                    <textarea
-                      className="rule-input"
-                      value={rule.trigger}
-                      onChange={(event) => updateRuleDraft(rule.id, { trigger: event.target.value })}
-                    />
-                  </label>
-                  <label className="field-label">
-                    Condition
-                    <textarea
-                      className="rule-input"
-                      value={rule.condition}
-                      onChange={(event) =>
-                        updateRuleDraft(rule.id, { condition: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field-label">
-                    Actions
-                    <textarea
-                      className="rule-input"
-                      value={rule.actions.join('\n')}
-                      onChange={(event) =>
-                        updateRuleDraft(rule.id, {
-                          actions: event.target.value
-                            .split('\n')
-                            .map((action) => action.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </label>
-                  <ul className="rule-actions">
-                    {rule.actions.map((action) => (
-                      <li key={action}>{action}</li>
-                    ))}
-                  </ul>
-                  <p className="rule-footer">
-                    {rule.enabled ? 'This rule is active in the simulator.' : 'This rule is staged off.'}
-                  </p>
-                  {result ? (
-                    <p className="rule-footer">
-                      Test result: {result.status.toUpperCase()} • {result.detail}
-                    </p>
-                  ) : (
-                    <p className="rule-footer">Test result: not run yet.</p>
-                  )}
-                </article>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Connector Lab</p>
-              <h2>Automation relay matrix</h2>
-            </div>
-            <span className="status-pill">Zapier + Make + Meta CAPI</span>
-          </div>
-          <div className="connector-grid">
-            {automationConnectors.map((connector) => {
-              const state = connectorStates[connector.name] ?? defaultConnectorStates[connector.name]
-
-              return (
-                <article key={connector.name} className="connector-card">
-                  <div className="connector-topline">
-                    <div>
-                      <p className="mini-label">{connector.category}</p>
-                      <h3>{connector.name}</h3>
-                    </div>
-                    <span className={`connector-status connector-${state?.status ?? 'ready'}`}>
-                      {state?.status ?? 'ready'}
-                    </span>
-                  </div>
-                  <p>{connector.use}</p>
-                  <p className="timeline-meta">
-                    Last ping: {state?.lastPing ?? 'just now'} • Runs: {state?.runs ?? 0}
-                  </p>
-                  <p className="connector-note">{state?.note ?? 'Ready for the next relay.'}</p>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleConnectorPing(connector.name)}
-                  >
-                    Ping connector
-                  </button>
-                </article>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Delivery Outbox</p>
-              <h2>Connector run queue</h2>
-            </div>
-            <span className="status-pill">{filteredDeliveryQueue.length} visible runs</span>
-          </div>
-          <div className="audit-toolbar">
-            <select
-              className="audit-select"
-              value={deliveryFilter}
-              onChange={(event) => setDeliveryFilter(event.target.value as DeliveryStatus | 'all')}
-            >
-              <option value="all">All statuses</option>
-              <option value="queued">Queued</option>
-              <option value="processing">Processing</option>
-              <option value="delivered">Delivered</option>
-              <option value="failed">Failed</option>
-            </select>
-          </div>
-          <div className="queue-grid">
-            {filteredDeliveryQueue.map((item) => (
-              <article key={item.id} className="queue-card">
-                <div className="booking-topline">
-                  <div>
-                    <p className="event-name">{item.payloadLabel}</p>
-                    <p className="timeline-meta">
-                      {item.connector} • {item.channel} • {item.target}
-                    </p>
-                  </div>
-                  <span className={`connector-status connector-${item.status}`}>
-                    {item.status}
-                  </span>
-                </div>
-                <p>{item.note}</p>
-                <p className="timeline-meta">Last attempt: {item.lastAttempt}</p>
-                <div className="control-row">
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleDeliveryRetry(item.id)}
-                  >
-                    Retry delivery
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Webhook Inspector</p>
-              <h2>Current payload</h2>
-            </div>
-            <span className="status-pill">Server-side ready</span>
-          </div>
-          <div className="payload-controls">
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() => setWebhookInput(JSON.stringify(activePayload, null, 2))}
-            >
-              Reset to template
-            </button>
-            <button
-              type="button"
-              className="button button-primary button-small"
-              onClick={handleWebhookValidate}
-            >
-              Validate payload
-            </button>
-          </div>
-          <textarea
-            className="payload-editor"
-            value={webhookInput}
-            onChange={(event) => setWebhookInput(event.target.value)}
-            spellCheck={false}
-          />
-          {webhookResult ? (
-            <p
-              className={`webhook-result ${
-                webhookResult.status === 'accepted' ? 'webhook-accepted' : 'webhook-rejected'
-              }`}
-            >
-              {webhookResult.message}
-            </p>
-          ) : null}
-          <div className="webhook-history">
-            <div className="subsection-header">
-              <h3>Webhook inbox</h3>
-              <span className="mini-label">{webhookHistory.length} events</span>
-            </div>
-            {webhookHistory.map((item) => (
-              <article key={item.id} className="webhook-item">
-                <div>
-                  <span>{item.label}</span>
-                  <small>{item.id}</small>
-                </div>
-                <div className="control-row">
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => {
-                      setWebhookInput(item.payload)
-                      setWebhookResult({
-                        status: 'accepted',
-                        message: `Loaded ${item.label} from webhook inbox.`,
-                      })
-                    }}
-                  >
-                    Load
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-primary button-small"
-                    onClick={() => handleWebhookReplay(item)}
-                  >
-                    Replay
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Operator Audit</p>
-              <h2>Execution history</h2>
-            </div>
-            <span className="status-pill">{auditEvents.length} records</span>
-          </div>
-          <div className="audit-toolbar">
-            <input
-              className="audit-search"
-              type="search"
-              value={auditQuery}
-              onChange={(event) => setAuditQuery(event.target.value)}
-              placeholder="Search rules, connectors, webhooks, notes, or scenario IDs"
-            />
-            <select
-              className="audit-select"
-              value={auditKindFilter}
-              onChange={(event) => setAuditKindFilter(event.target.value as 'all' | AuditKind)}
-            >
-              <option value="all">All events</option>
-              <option value="scenario">Scenario</option>
-              <option value="webhook">Webhook</option>
-              <option value="rule">Rule</option>
-              <option value="connector">Connector</option>
-              <option value="note">Note</option>
-            </select>
-          </div>
-          <div className="audit-list">
-            {auditEvents
-              .filter((entry) => (auditKindFilter === 'all' ? true : entry.kind === auditKindFilter))
-              .filter((entry) => {
-                const haystack = `${entry.title} ${entry.detail} ${entry.target} ${entry.timestamp}`.toLowerCase()
-                return haystack.includes(auditQuery.toLowerCase())
-              })
-              .map((entry) => (
-                <article key={entry.id} className="audit-card">
-                  <div className="booking-topline">
-                    <div>
-                      <p className="event-name">{entry.title}</p>
-                      <p className="timeline-meta">
-                        {entry.target} • {entry.timestamp}
-                      </p>
-                    </div>
-                    <span className={`event-status audit-${entry.kind}`}>{entry.kind}</span>
-                  </div>
-                  <p>{entry.detail}</p>
-                </article>
-              ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Module 2</p>
-              <h2>Routing + No-Show Recovery</h2>
-            </div>
-            <span className="status-pill">GHL mirror</span>
-          </div>
-          <div className="booking-stack">
-            <article className="booking-card booking-highlight">
-              <div className="booking-topline">
-                <div>
-                  <p className="mini-label">Selected scenario state</p>
-                  <h3>{activeLead.name}</h3>
-                  <p>{activeBooking?.slot ?? 'No call slot required'}</p>
-                </div>
-                <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
-                  {runtime.bookingStatuses[stepIndex]}
-                </span>
-              </div>
-              <p className="booking-owner">Owner: {activeLead.owner}</p>
-              <p>
-                {activeBooking?.recoveryAction ??
-                  'Payment path skips call handling and moves directly into onboarding automation.'}
-              </p>
-            </article>
-
-            {bookings.map((booking) => {
-              const lead = leads.find((entry) => entry.id === booking.leadId)
-              return (
-                <article key={booking.id} className="booking-card">
-                  <div className="booking-topline">
-                    <div>
-                      <h3>{lead?.name}</h3>
-                      <p>{booking.slot}</p>
-                    </div>
-                    <span className={`booking-status booking-${booking.status}`}>
-                      {booking.status}
-                    </span>
-                  </div>
-                  <p className="booking-owner">Closer: {booking.owner}</p>
-                  <p>{booking.recoveryAction}</p>
-                </article>
-              )
-            })}
-          </div>
-        </section>
-
-        <section id="dashboard" className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Module 3</p>
-              <h2>Revenue + Tracking Dashboard</h2>
-            </div>
-            <span className="status-pill">Stripe + Meta-ready</span>
-          </div>
-
-          <div className="dashboard-layout">
-            <div className="metric-grid">
-              {revenueMetrics.map((metric) => (
-                <article key={metric.label} className="metric-card">
-                  <p className="metric-label">{metric.label}</p>
-                  <p className="metric-value">{metric.value}</p>
-                  <p className="metric-delta">{metric.delta}</p>
-                </article>
-              ))}
-            </div>
-
-            <article className="capi-card">
-              <div className="subsection-header">
-                <h3>CAPI-ready server events</h3>
-                <p>Clean naming, match keys, and payload status for a future Meta handoff.</p>
-              </div>
-              <div className="capi-table">
-                {capiEvents.map((event) => (
-                  <div key={event.eventName} className="capi-row">
-                    <div>
-                      <p className="event-name">{event.eventName}</p>
-                      <p>{event.source}</p>
-                    </div>
-                    <div>
-                      <p className="mini-label">Match keys</p>
-                      <p>{event.matchKeys.join(', ')}</p>
-                    </div>
-                    <div>
-                      <p className="mini-label">Status</p>
-                      <p>{event.payloadStatus}</p>
-                    </div>
-                  </div>
+                  </article>
                 ))}
               </div>
-            </article>
-          </div>
+            </div>
+          ) : null}
+
+          <section className="notes-dock">
+            <div className="subsection-header">
+              <h3>Operator notes</h3>
+              <span className="mini-label">Persisted locally</span>
+            </div>
+            <textarea
+              className="notes-editor"
+              value={operatorNotes}
+              onChange={(event) => setOperatorNotes(event.target.value)}
+              placeholder="Capture changes, blockers, or how this flow would map to a live client account."
+            />
+          </section>
         </section>
 
-        <section className="panel">
+        <aside className="panel mission-rail">
           <div className="panel-header">
             <div>
-              <p className="panel-kicker">Coverage</p>
-              <h2>Stack Fit</h2>
+              <p className="panel-kicker">Operations Rail</p>
+              <h2>Relays and intelligence</h2>
             </div>
-            <span className="status-pill">Job-post aligned</span>
+            <span className="status-pill">{railTab}</span>
           </div>
-          <div className="fit-stack">
-            {integrationFit.map((item) => (
-              <article key={item.name} className="fit-card">
-                <h3>{item.name}</h3>
-                <p>{item.fit}</p>
-              </article>
+
+          <div className="tab-row tab-row-compact">
+            {[
+              ['operations', 'Ops'],
+              ['audit', 'Audit'],
+              ['automation', 'Automation'],
+              ['metrics', 'Metrics'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`tab-button ${railTab === value ? 'tab-button-active' : ''}`}
+                onClick={() => setRailTab(value as RailTab)}
+              >
+                {label}
+              </button>
             ))}
           </div>
-        </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Scenario Trail</p>
-              <h2>Operator Timeline</h2>
-            </div>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() => setShowExpandedTimeline(!showExpandedTimeline)}
-            >
-              {showExpandedTimeline ? 'Show scenario only' : 'Show full event trail'}
-            </button>
-          </div>
-          <div className="timeline-stack">
-            {(showExpandedTimeline ? eventLog : scenarioEvents).map((entry) => (
-              <article key={entry.id} className="timeline-card">
-                <div className="booking-topline">
-                  <p className="event-name">{entry.event}</p>
-                  <span className={`event-status event-${entry.status}`}>{entry.status}</span>
+          {railTab === 'operations' ? (
+            <div className="rail-stack">
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Delivery outbox</h3>
+                  <span className="mini-label">{activeLeadQueue.length} for active lead</span>
                 </div>
-                <p>{entry.detail}</p>
-                <p className="timeline-meta">
-                  {entry.channel} • {entry.timestamp}
-                </p>
+                <div className="audit-toolbar">
+                  <select
+                    className="audit-select"
+                    value={deliveryFilter}
+                    onChange={(event) =>
+                      setDeliveryFilter(event.target.value as DeliveryStatus | 'all')
+                    }
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="queued">Queued</option>
+                    <option value="processing">Processing</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
+                <div className="queue-grid">
+                  {(activeLeadQueue.length ? activeLeadQueue : filteredDeliveryQueue).map((item) => (
+                    <article key={item.id} className="queue-card">
+                      <div className="booking-topline">
+                        <div>
+                          <p className="event-name">{item.payloadLabel}</p>
+                          <p className="timeline-meta">
+                            {item.connector} • {item.channel} • {item.target}
+                          </p>
+                        </div>
+                        <span className={`connector-status connector-${item.status}`}>
+                          {item.status}
+                        </span>
+                      </div>
+                      <p>{item.note}</p>
+                      <p className="timeline-meta">Last attempt: {item.lastAttempt}</p>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => handleDeliveryRetry(item.id)}
+                      >
+                        Retry delivery
+                      </button>
+                    </article>
+                  ))}
+                </div>
               </article>
-            ))}
-          </div>
-        </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Operator Notes</p>
-              <h2>Session memory</h2>
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Connector health</h3>
+                  <span className="mini-label">Zapier, Make, GHL, Meta</span>
+                </div>
+                <div className="connector-grid">
+                  {automationConnectors.map((connector) => {
+                    const state =
+                      connectorStates[connector.name] ?? defaultConnectorStates[connector.name]
+
+                    return (
+                      <article key={connector.name} className="connector-card">
+                        <div className="connector-topline">
+                          <div>
+                            <p className="mini-label">{connector.category}</p>
+                            <h3>{connector.name}</h3>
+                          </div>
+                          <span className={`connector-status connector-${state?.status ?? 'ready'}`}>
+                            {state?.status ?? 'ready'}
+                          </span>
+                        </div>
+                        <p>{connector.use}</p>
+                        <p className="timeline-meta">
+                          Last ping: {state?.lastPing ?? 'just now'} • Runs: {state?.runs ?? 0}
+                        </p>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => handleConnectorPing(connector.name)}
+                        >
+                          Ping
+                        </button>
+                      </article>
+                    )
+                  })}
+                </div>
+              </article>
             </div>
-            <span className="status-pill">Persisted locally</span>
-          </div>
-          <div className="control-row">
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={handleLogNote}
-            >
-              Log note
-            </button>
-          </div>
-          <textarea
-            className="notes-editor"
-            value={operatorNotes}
-            onChange={(event) => setOperatorNotes(event.target.value)}
-            placeholder="Capture what changed, what to ship next, or how this scenario maps to a client funnel."
-          />
-          {operatorNotesHistory.length ? (
-            <div className="timeline-stack">
-              {operatorNotesHistory.map((note) => (
-                <article key={note.id} className="timeline-card">
-                  <div className="booking-topline">
-                    <p className="event-name">{note.note}</p>
-                    <span className="event-status event-processed">logged</span>
-                  </div>
-                  <p className="timeline-meta">
-                    {note.scenarioId} • {note.stepLabel} • {note.timestamp}
-                  </p>
-                </article>
-              ))}
+          ) : null}
+
+          {railTab === 'audit' ? (
+            <div className="rail-stack">
+              <div className="audit-toolbar">
+                <input
+                  className="audit-search"
+                  type="search"
+                  value={auditQuery}
+                  onChange={(event) => setAuditQuery(event.target.value)}
+                  placeholder="Search audit log"
+                />
+                <select
+                  className="audit-select"
+                  value={auditKindFilter}
+                  onChange={(event) => setAuditKindFilter(event.target.value as 'all' | AuditKind)}
+                >
+                  <option value="all">All events</option>
+                  <option value="scenario">Scenario</option>
+                  <option value="webhook">Webhook</option>
+                  <option value="rule">Rule</option>
+                  <option value="connector">Connector</option>
+                  <option value="note">Note</option>
+                </select>
+              </div>
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Active lead trail</h3>
+                  <span className="mini-label">{activeLeadAudit.length} matched</span>
+                </div>
+                <div className="audit-list">
+                  {(activeLeadAudit.length ? activeLeadAudit : visibleAuditEvents).map((entry) => (
+                    <article key={entry.id} className="audit-card">
+                      <div className="booking-topline">
+                        <div>
+                          <p className="event-name">{entry.title}</p>
+                          <p className="timeline-meta">
+                            {entry.target} • {entry.timestamp}
+                          </p>
+                        </div>
+                        <span className={`event-status audit-${entry.kind}`}>{entry.kind}</span>
+                      </div>
+                      <p>{entry.detail}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
             </div>
-          ) : (
-            <p className="stat-note">No operator notes logged yet.</p>
-          )}
-        </section>
+          ) : null}
+
+          {railTab === 'automation' ? (
+            <div className="rail-stack">
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Rule lab</h3>
+                  <span className="mini-label">{ruleDrafts.length} active rules</span>
+                </div>
+                <div className="rule-stack">
+                  {ruleDrafts.map((rule) => {
+                    const sourceRule = automationRules.find((entry) => entry.id === rule.id)
+                    const result = ruleTestResults[rule.id]
+
+                    return (
+                      <article
+                        key={rule.id}
+                        className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}
+                      >
+                        <div className="rule-header">
+                          <div>
+                            <p className="mini-label">{sourceRule?.system}</p>
+                            <h3>{rule.trigger}</h3>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => handleRuleTest(rule.id)}
+                          >
+                            Run test
+                          </button>
+                        </div>
+                        <p className="rule-condition">{rule.condition}</p>
+                        <ul className="rule-actions">
+                          {rule.actions.map((action) => (
+                            <li key={action}>{action}</li>
+                          ))}
+                        </ul>
+                        <p className="rule-footer">
+                          {result
+                            ? `Test result: ${result.status.toUpperCase()} • ${result.detail}`
+                            : 'Test result: not run yet.'}
+                        </p>
+                      </article>
+                    )
+                  })}
+                </div>
+              </article>
+
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Coverage map</h3>
+                  <span className="mini-label">Job-post aligned</span>
+                </div>
+                <div className="fit-stack">
+                  {integrationFit.map((item) => (
+                    <article key={item.name} className="fit-card">
+                      <h3>{item.name}</h3>
+                      <p>{item.fit}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+            </div>
+          ) : null}
+
+          {railTab === 'metrics' ? (
+            <div className="rail-stack">
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Revenue dashboard</h3>
+                  <span className="mini-label">Stripe + Meta-ready</span>
+                </div>
+                <div className="metric-grid">
+                  {revenueMetrics.map((metric) => (
+                    <article key={metric.label} className="metric-card">
+                      <p className="metric-label">{metric.label}</p>
+                      <p className="metric-value">{metric.value}</p>
+                      <p className="metric-delta">{metric.delta}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Meta CAPI payloads</h3>
+                  <span className="mini-label">{capiEvents.length} events</span>
+                </div>
+                <div className="capi-table">
+                  {capiEvents.map((event) => (
+                    <div key={event.eventName} className="capi-row">
+                      <div>
+                        <p className="event-name">{event.eventName}</p>
+                        <p>{event.source}</p>
+                      </div>
+                      <div>
+                        <p className="mini-label">Match keys</p>
+                        <p>{event.matchKeys.join(', ')}</p>
+                      </div>
+                      <div>
+                        <p className="mini-label">Status</p>
+                        <p>{event.payloadStatus}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rail-card">
+                <div className="subsection-header">
+                  <h3>Shipped modules</h3>
+                </div>
+                <div className="fit-stack">
+                  {repoModules.map((module) => (
+                    <article key={module.name} className="fit-card">
+                      <h3>{module.name}</h3>
+                      <p>{module.summary}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+            </div>
+          ) : null}
+        </aside>
       </main>
     </div>
   )

@@ -3,6 +3,179 @@
   gap: 1.2rem;
 }
 
+.mission-topbar {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.3fr);
+  padding: 1.4rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 143, 77, 0.18), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(41, 111, 255, 0.16), transparent 30%),
+    var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.topbar-metrics {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.topbar-metric {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.topbar-value {
+  margin: 0.35rem 0;
+  font-family: var(--display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  line-height: 1;
+}
+
+.mission-control {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 320px minmax(0, 1fr) 360px;
+  align-items: start;
+}
+
+.mission-sidebar,
+.mission-main,
+.mission-rail {
+  position: sticky;
+  top: 1rem;
+}
+
+.mission-sidebar,
+.mission-rail {
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.mission-main {
+  min-height: calc(100vh - 2rem);
+}
+
+.lead-queue,
+.rail-stack {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.9rem;
+}
+
+.lead-queue-item {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-alt);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.lead-queue-item-active {
+  border-color: rgba(24, 39, 84, 0.24);
+  box-shadow: 0 14px 24px rgba(28, 24, 18, 0.08);
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(245, 241, 233, 0.9));
+}
+
+.lead-queue-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.lead-queue-note {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.mission-summary {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.9rem;
+}
+
+.mission-highlight,
+.rail-card,
+.recovery-actions-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 0.95rem;
+  background: var(--surface-alt);
+}
+
+.mission-progress {
+  margin-top: 0.9rem;
+}
+
+.command-row,
+.tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.command-row {
+  margin-top: 1rem;
+}
+
+.tab-row {
+  margin-top: 1rem;
+}
+
+.tab-row-compact {
+  margin-top: 0.7rem;
+}
+
+.tab-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-main);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab-button-active {
+  background: #20252f;
+  color: #eef4ff;
+  border-color: transparent;
+}
+
+.workbench-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  margin-top: 1rem;
+}
+
+.payload-workbench,
+.notes-dock {
+  margin-top: 1rem;
+}
+
+.notes-dock {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
 .hero-panel,
 .panel,
 .stat-card,
@@ -974,6 +1147,8 @@
 }
 
 @media (max-width: 1100px) {
+  .mission-topbar,
+  .mission-control,
   .hero-panel,
   .workspace,
   .simulator-grid,
@@ -989,7 +1164,10 @@
   .metric-grid,
   .detail-grid,
   .scenario-impact,
-  .fit-stack {
+  .fit-stack,
+  .mission-summary,
+  .workbench-grid,
+  .topbar-metrics {
     grid-template-columns: 1fr;
   }
 
@@ -1005,10 +1183,18 @@
 }
 
 @media (max-width: 720px) {
+  .mission-topbar,
   .hero-panel,
   .panel {
     padding: 1.1rem;
     border-radius: 22px;
+  }
+
+  .mission-sidebar,
+  .mission-main,
+  .mission-rail {
+    position: static;
+    max-height: none;
   }
 
   .hero-card-header,
@@ -1017,7 +1203,8 @@
   .lead-header,
   .booking-topline,
   .subsection-header,
-  .scenario-header {
+  .scenario-header,
+  .lead-queue-topline {
     flex-direction: column;
   }
 
