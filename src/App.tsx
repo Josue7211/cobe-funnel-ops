@@ -26,6 +26,38 @@ type ScenarioRuntime = {
   metricValues: string[]
 }
 
+type RuleDraft = {
+  id: string
+  trigger: string
+  condition: string
+  actions: string[]
+  enabled: boolean
+}
+
+type RuleTestResult = {
+  status: 'pass' | 'fail' | 'skipped'
+  detail: string
+  timestamp: string
+}
+
+type WebhookEvent = {
+  id: string
+  label: string
+  payload: string
+}
+
+type OperatorNote = {
+  id: string
+  note: string
+  timestamp: string
+  scenarioId: string
+  stepLabel: string
+}
+
+type WebhookValidation =
+  | { ok: true; parsed: Record<string, unknown>; label: string }
+  | { ok: false; message: string }
+
 const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   'scenario-001': {
     stepLabels: ['Inbound DM', 'Tag + qualify', 'Checkout sent', 'Purchase ready'],
@@ -147,6 +179,22 @@ function readPersistedState() {
 
 function App() {
   const persisted = readPersistedState()
+  const defaultWebhookHistory: WebhookEvent[] = [
+    {
+      id: 'wh-001',
+      label: 'DM inbound received',
+      payload: JSON.stringify(scenarioRuntimes['scenario-001'].payloads[0], null, 2),
+    },
+    {
+      id: 'wh-002',
+      label: 'Call marked no-show',
+      payload: JSON.stringify(scenarioRuntimes['scenario-002'].payloads[2], null, 2),
+    },
+  ]
+  const defaultRuleDrafts: RuleDraft[] = automationRules.map((rule) => ({
+    ...rule,
+    enabled: true,
+  }))
   const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
   const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
   const [showExpandedTimeline, setShowExpandedTimeline] = useState(
@@ -155,6 +203,20 @@ function App() {
   const [operatorNotes, setOperatorNotes] = useState(persisted?.operatorNotes ?? '')
   const [webhookInput, setWebhookInput] = useState(
     JSON.stringify(scenarioRuntimes[demoScenarios[0].id].payloads[0], null, 2),
+  )
+  const [webhookHistory, setWebhookHistory] = useState<WebhookEvent[]>(
+    Array.isArray(persisted?.webhookHistory) ? persisted.webhookHistory : defaultWebhookHistory,
+  )
+  const [ruleDrafts, setRuleDrafts] = useState<RuleDraft[]>(
+    Array.isArray(persisted?.ruleDrafts) ? persisted.ruleDrafts : defaultRuleDrafts,
+  )
+  const [operatorNotesHistory, setOperatorNotesHistory] = useState<OperatorNote[]>(
+    Array.isArray(persisted?.operatorNotesHistory) ? persisted.operatorNotesHistory : [],
+  )
+  const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>(
+    persisted?.ruleTestResults && typeof persisted.ruleTestResults === 'object'
+      ? persisted.ruleTestResults
+      : {},
   )
   const [webhookResult, setWebhookResult] = useState<{
     status: 'accepted' | 'rejected'
@@ -191,14 +253,22 @@ function App() {
         stepIndex,
         showExpandedTimeline,
         operatorNotes,
+        webhookHistory,
+        ruleDrafts,
+        operatorNotesHistory,
+        ruleTestResults,
       }),
     )
-  }, [operatorNotes, scenarioId, showExpandedTimeline, stepIndex])
-
-  const resetWebhookState = (nextPayloadText: string) => {
-    setWebhookInput(nextPayloadText)
-    setWebhookResult(null)
-  }
+  }, [
+    operatorNotes,
+    operatorNotesHistory,
+    ruleDrafts,
+    ruleTestResults,
+    scenarioId,
+    showExpandedTimeline,
+    stepIndex,
+    webhookHistory,
+  ])
 
   const handleScenarioChange = (nextScenarioId: string) => {
     const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
@@ -207,19 +277,21 @@ function App() {
       setScenarioId(nextScenarioId)
       setStepIndex(0)
       setShowExpandedTimeline(false)
-      resetWebhookState(JSON.stringify(nextRuntime.payloads[0], null, 2))
+      setWebhookInput(JSON.stringify(nextRuntime.payloads[0], null, 2))
+      setWebhookResult(null)
     })
   }
 
   const handleStepChange = (nextStepIndex: number) => {
     const boundedStep = Math.max(0, Math.min(nextStepIndex, runtime.stepLabels.length - 1))
     setStepIndex(boundedStep)
-    resetWebhookState(JSON.stringify(runtime.payloads[boundedStep], null, 2))
+    setWebhookInput(JSON.stringify(runtime.payloads[boundedStep], null, 2))
+    setWebhookResult(null)
   }
 
-  const handleWebhookValidate = () => {
+  const validateWebhookPayload = (raw: string): WebhookValidation => {
     try {
-      const parsed = JSON.parse(webhookInput) as Record<string, unknown>
+      const parsed = JSON.parse(raw) as Record<string, unknown>
       const hasRecognizedSignal =
         typeof parsed.event_name === 'string' ||
         typeof parsed.booking_status === 'string' ||
@@ -227,34 +299,176 @@ function App() {
         Array.isArray(parsed.onboarding_assets)
 
       if (!hasRecognizedSignal) {
-        setWebhookResult({
-          status: 'rejected',
+        return {
+          ok: false,
           message: 'Rejected: payload is valid JSON but missing a recognized automation signal.',
-        })
-        return
+        }
       }
 
-      setWebhookResult({
-        status: 'accepted',
-        message: 'Accepted: payload passes schema check and is ready for the simulated automation relay.',
-      })
+      return {
+        ok: true,
+        parsed,
+        label: String(parsed.event_name ?? parsed.route ?? parsed.booking_status ?? 'custom event'),
+      }
     } catch {
+      return { ok: false, message: 'Rejected: payload is not valid JSON.' }
+    }
+  }
+
+  const handleWebhookValidate = () => {
+    const result = validateWebhookPayload(webhookInput)
+    if (!result.ok) {
       setWebhookResult({
         status: 'rejected',
-        message: 'Rejected: payload is not valid JSON.',
+        message: result.message,
       })
+      return
     }
+
+    setWebhookResult({
+      status: 'accepted',
+      message: 'Accepted: payload passes schema check and is ready for the simulated automation relay.',
+    })
+    setWebhookHistory((current) => [
+      {
+        id: `wh-${String(current.length + 1).padStart(3, '0')}`,
+        label: result.label,
+        payload: JSON.stringify(result.parsed, null, 2),
+      },
+      ...current,
+    ])
+  }
+
+  const handleWebhookReplay = (item: WebhookEvent) => {
+    setWebhookInput(item.payload)
+    const result = validateWebhookPayload(item.payload)
+    if (!result.ok) {
+      setWebhookResult({
+        status: 'rejected',
+        message: `Replay failed: ${result.message}`,
+      })
+      return
+    }
+    setWebhookResult({
+      status: 'accepted',
+      message: `Replayed ${item.label} into the simulator.`,
+    })
+    setWebhookHistory((current) => [
+      {
+        id: `wh-${String(current.length + 1).padStart(3, '0')}`,
+        label: `Replay: ${item.label}`,
+        payload: JSON.stringify(result.parsed, null, 2),
+      },
+      ...current,
+    ])
+  }
+
+  const updateRuleDraft = (ruleId: string, patch: Partial<RuleDraft>) => {
+    setRuleDrafts((current) =>
+      current.map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
+    )
+  }
+
+  const evaluateRule = (rule: RuleDraft): RuleTestResult => {
+    const timestamp = new Date().toISOString()
+    if (!rule.enabled) {
+      return { status: 'skipped', detail: 'Rule disabled in the current simulator run.', timestamp }
+    }
+
+    const transcript = activeConversation.messages.map((message) => message.text).join(' ').toLowerCase()
+    const trigger = rule.trigger.toLowerCase()
+
+    if (trigger.includes('keyword')) {
+      const keywords = ['price', 'link', 'join']
+      const matched = keywords.some((keyword) => transcript.includes(keyword))
+      return {
+        status: matched ? 'pass' : 'fail',
+        detail: matched
+          ? 'Matched intent keyword in the DM transcript.'
+          : 'No keyword match in the current DM transcript.',
+        timestamp,
+      }
+    }
+
+    if (trigger.includes('intent')) {
+      const matched = activeConversation.intent === 'call' || activeConversation.intent === 'checkout'
+      return {
+        status: matched ? 'pass' : 'fail',
+        detail: matched
+          ? `Matched intent signal: ${activeConversation.intent}.`
+          : 'Intent signal missing for this scenario.',
+        timestamp,
+      }
+    }
+
+    if (trigger.includes('webhook') || trigger.includes('call missed') || trigger.includes('no-show')) {
+      const matched = runtime.bookingStatuses[stepIndex] === 'no-show'
+      return {
+        status: matched ? 'pass' : 'fail',
+        detail: matched ? 'No-show status detected in the active booking state.' : 'No-show not present.',
+        timestamp,
+      }
+    }
+
+    const hasActions = rule.actions.length > 0
+    return {
+      status: hasActions ? 'pass' : 'fail',
+      detail: hasActions ? 'Rule has runnable actions defined.' : 'No actions defined to execute.',
+      timestamp,
+    }
+  }
+
+  const handleRuleTest = (ruleId: string) => {
+    const rule = ruleDrafts.find((entry) => entry.id === ruleId)
+    if (!rule) {
+      return
+    }
+    const result = evaluateRule(rule)
+    setRuleTestResults((current) => ({
+      ...current,
+      [ruleId]: result,
+    }))
+  }
+
+  const handleLogNote = () => {
+    const trimmed = operatorNotes.trim()
+    if (!trimmed) {
+      return
+    }
+
+    const entry: OperatorNote = {
+      id: `note-${String(operatorNotesHistory.length + 1).padStart(3, '0')}`,
+      note: trimmed,
+      timestamp: new Date().toISOString(),
+      scenarioId: activeScenario.id,
+      stepLabel: runtime.stepLabels[stepIndex],
+    }
+    setOperatorNotesHistory((current) => [entry, ...current])
   }
 
   const handleExport = () => {
     const payload = {
+      exportedAt: new Date().toISOString(),
       scenario: activeScenario.title,
       step: runtime.stepLabels[stepIndex],
+      stepIndex,
       lead: activeLead,
+      conversation: {
+        id: activeConversation.id,
+        intent: activeConversation.intent,
+        score: activeConversation.score,
+        transcript: visibleMessages,
+      },
       bookingStatus: runtime.bookingStatuses[stepIndex],
       visibleEvents: scenarioEvents,
       webhookPayload: activePayload,
       notes: operatorNotes,
+      notesHistory: operatorNotesHistory,
+      webhookHistory,
+      ruleDrafts,
+      ruleTestResults,
+      metrics: revenueMetrics,
+      capiEvents,
     }
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -501,24 +715,97 @@ function App() {
         <section className="panel">
           <div className="panel-header">
             <div>
-              <p className="panel-kicker">Rules</p>
+              <p className="panel-kicker">Rule Lab</p>
               <h2>Automation Logic</h2>
             </div>
-            <span className="status-pill">Low-code friendly</span>
+            <span className="status-pill">Editable + testable</span>
           </div>
           <div className="rule-stack">
-            {automationRules.map((rule) => (
-              <article key={rule.id} className="rule-card">
-                <p className="mini-label">{rule.system}</p>
-                <h3>{rule.trigger}</h3>
-                <p className="rule-condition">{rule.condition}</p>
-                <ul className="rule-actions">
-                  {rule.actions.map((action) => (
-                    <li key={action}>{action}</li>
-                  ))}
-                </ul>
-              </article>
-            ))}
+            {ruleDrafts.map((rule) => {
+              const sourceRule = automationRules.find((entry) => entry.id === rule.id)
+              const result = ruleTestResults[rule.id]
+
+              return (
+                <article
+                  key={rule.id}
+                  className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}
+                >
+                  <div className="rule-header">
+                    <div>
+                      <p className="mini-label">{sourceRule?.system}</p>
+                      <h3>{rule.trigger}</h3>
+                    </div>
+                    <div className="control-row">
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => handleRuleTest(rule.id)}
+                      >
+                        Run test
+                      </button>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={rule.enabled}
+                          onChange={(event) =>
+                            updateRuleDraft(rule.id, { enabled: event.target.checked })
+                          }
+                        />
+                        <span>Enabled</span>
+                      </label>
+                    </div>
+                  </div>
+                  <label className="field-label">
+                    Trigger
+                    <textarea
+                      className="rule-input"
+                      value={rule.trigger}
+                      onChange={(event) => updateRuleDraft(rule.id, { trigger: event.target.value })}
+                    />
+                  </label>
+                  <label className="field-label">
+                    Condition
+                    <textarea
+                      className="rule-input"
+                      value={rule.condition}
+                      onChange={(event) =>
+                        updateRuleDraft(rule.id, { condition: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="field-label">
+                    Actions
+                    <textarea
+                      className="rule-input"
+                      value={rule.actions.join('\n')}
+                      onChange={(event) =>
+                        updateRuleDraft(rule.id, {
+                          actions: event.target.value
+                            .split('\n')
+                            .map((action) => action.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                    />
+                  </label>
+                  <ul className="rule-actions">
+                    {rule.actions.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                  <p className="rule-footer">
+                    {rule.enabled ? 'This rule is active in the simulator.' : 'This rule is staged off.'}
+                  </p>
+                  {result ? (
+                    <p className="rule-footer">
+                      Test result: {result.status.toUpperCase()} • {result.detail}
+                    </p>
+                  ) : (
+                    <p className="rule-footer">Test result: not run yet.</p>
+                  )}
+                </article>
+              )
+            })}
           </div>
         </section>
 
@@ -561,6 +848,42 @@ function App() {
               {webhookResult.message}
             </p>
           ) : null}
+          <div className="webhook-history">
+            <div className="subsection-header">
+              <h3>Webhook inbox</h3>
+              <span className="mini-label">{webhookHistory.length} events</span>
+            </div>
+            {webhookHistory.map((item) => (
+              <article key={item.id} className="webhook-item">
+                <div>
+                  <span>{item.label}</span>
+                  <small>{item.id}</small>
+                </div>
+                <div className="control-row">
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => {
+                      setWebhookInput(item.payload)
+                      setWebhookResult({
+                        status: 'accepted',
+                        message: `Loaded ${item.label} from webhook inbox.`,
+                      })
+                    }}
+                  >
+                    Load
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-primary button-small"
+                    onClick={() => handleWebhookReplay(item)}
+                  >
+                    Replay
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="panel">
@@ -685,7 +1008,7 @@ function App() {
             <button
               type="button"
               className="button button-secondary button-small"
-              onClick={() => setShowExpandedTimeline((current: boolean) => !current)}
+              onClick={() => setShowExpandedTimeline(!showExpandedTimeline)}
             >
               {showExpandedTimeline ? 'Show scenario only' : 'Show full event trail'}
             </button>
@@ -714,12 +1037,38 @@ function App() {
             </div>
             <span className="status-pill">Persisted locally</span>
           </div>
+          <div className="control-row">
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleLogNote}
+            >
+              Log note
+            </button>
+          </div>
           <textarea
             className="notes-editor"
             value={operatorNotes}
             onChange={(event) => setOperatorNotes(event.target.value)}
             placeholder="Capture what changed, what to ship next, or how this scenario maps to a client funnel."
           />
+          {operatorNotesHistory.length ? (
+            <div className="timeline-stack">
+              {operatorNotesHistory.map((note) => (
+                <article key={note.id} className="timeline-card">
+                  <div className="booking-topline">
+                    <p className="event-name">{note.note}</p>
+                    <span className="event-status event-processed">logged</span>
+                  </div>
+                  <p className="timeline-meta">
+                    {note.scenarioId} • {note.stepLabel} • {note.timestamp}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="stat-note">No operator notes logged yet.</p>
+          )}
         </section>
       </main>
     </div>
