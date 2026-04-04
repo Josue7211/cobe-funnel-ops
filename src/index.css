@@ -16,6 +16,11 @@
   --warning: #ffbc61;
   --danger: #ff7f86;
   --success: #78e1b3;
+  --neon-cyan: #54d9ff;
+  --neon-green: #7ef2b0;
+  --neon-amber: #ffbf63;
+  --neon-magenta: #ff7ed5;
+  --neon-red: #ff6d7a;
   --shadow-soft: 0 20px 70px rgba(0, 0, 0, 0.42);
   --display: 'Times New Roman', Georgia, serif;
   --sans: 'Trebuchet MS', 'Avenir Next', Avenir, sans-serif;

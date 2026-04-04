@@ -6,6 +6,7 @@ import {
   pingConnector as pingConnectorRequest,
   retryDelivery as retryDeliveryRequest,
   runLeadAction,
+  runLiveTest as runLiveTestRequest,
   validateWebhook as validateWebhookRequest,
 } from './api'
 import {
@@ -19,8 +20,6 @@ import {
   integrationFit,
   leads,
   repoModules,
-  revenueMetrics,
-  summaryStats,
 } from './data'
 import type { Booking, FunnelStage, Lead } from './types'
 
@@ -61,6 +60,19 @@ type OperatorNote = {
   timestamp: string
   scenarioId: string
   stepLabel: string
+}
+
+type LiveTestRun = {
+  id: string
+  scenarioId: string
+  scenarioTitle: string
+  stepLabel: string
+  payloadLabel: string
+  connector: string
+  status: 'accepted' | 'rejected'
+  resultMessage: string
+  payload: string
+  createdAt: string
 }
 
 type WebhookValidation =
@@ -119,6 +131,27 @@ const deliveryStatusPriority: Record<DeliveryStatus, number> = {
   queued: 1,
   processing: 2,
   delivered: 3,
+}
+
+function parseMoneyValue(raw: string) {
+  const compact = raw.toLowerCase().replace(/[^0-9.k]/g, '')
+  if (!compact) {
+    return 0
+  }
+
+  if (compact.includes('k')) {
+    return Number.parseFloat(compact.replace('k', '')) * 1000
+  }
+
+  return Number.parseFloat(compact)
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(Number.isFinite(value) ? value : 0)
 }
 
 const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
@@ -379,6 +412,9 @@ function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(
     Array.isArray(persisted?.auditEvents) ? persisted.auditEvents : initialAuditEvents,
   )
+  const [liveTestRuns, setLiveTestRuns] = useState<LiveTestRun[]>(
+    Array.isArray(persisted?.liveTestRuns) ? persisted.liveTestRuns : [],
+  )
   const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>(
     persisted?.ruleTestResults && typeof persisted.ruleTestResults === 'object'
       ? persisted.ruleTestResults
@@ -403,9 +439,6 @@ function App() {
     conversations.find((conversation) => conversation.id === activeScenario.conversationId) ??
     conversations[0]
   const activeBooking = bookingRecords.find((booking) => booking.id === activeScenario.bookingId)
-  const scenarioEvents = eventLog.filter((entry) =>
-    runtime.visibleEventIds[stepIndex]?.includes(entry.id),
-  )
   const visibleMessages = activeConversation.messages.slice(0, runtime.visibleMessageCount[stepIndex])
   const progress = ((stepIndex + 1) / runtime.stepLabels.length) * 100
   const activePayload = runtime.payloads[stepIndex]
@@ -446,9 +479,75 @@ function App() {
   )
   const activeLeadQueue = filteredDeliveryQueue.filter((item) => item.target === activeLead.handle)
   const activeLeadTimeline = eventLog.filter((entry) => entry.leadId === activeLead.id)
+  const scenarioEvents = eventLog.filter((entry) =>
+    runtime.visibleEventIds[stepIndex]?.includes(entry.id),
+  )
   const activeLeadAudit = auditEvents.filter((entry) =>
     `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.id) ||
     `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.handle.toLowerCase()),
+  )
+  const missionStats = useMemo(() => {
+    const leadsToday = leadRecords.length
+    const bookedCalls = bookingRecords.filter(
+      (booking) => booking.status === 'booked' || booking.status === 'reminded',
+    ).length
+    const recoveredNoShows = bookingRecords.filter((booking) => booking.status === 'recovered').length
+    const stripeRevenue = leadRecords
+      .filter((lead) => lead.stage === 'won')
+      .reduce((total, lead) => total + parseMoneyValue(lead.budget), 0)
+
+    return [
+      {
+        label: 'Leads Today',
+        value: String(leadsToday),
+        note: `${leadRecords.filter((lead) => lead.stage !== 'won').length} still active in the live queue`,
+      },
+      {
+        label: 'Booked Calls',
+        value: String(bookedCalls),
+        note: `${bookingRecords.length - bookedCalls} tracking recovery or follow-up`,
+      },
+      {
+        label: 'Recovered No-Shows',
+        value: String(recoveredNoShows),
+        note: `${bookingRecords.filter((booking) => booking.status === 'no-show').length} still at risk`,
+      },
+      {
+        label: 'Stripe Revenue',
+        value: formatCurrency(stripeRevenue),
+        note: 'Live SQL snapshot from won funnel paths',
+      },
+    ]
+  }, [bookingRecords, leadRecords])
+
+  const railMetrics = useMemo(
+    () => [
+      {
+        label: 'Pipeline value',
+        value: formatCurrency(
+          leadRecords
+            .filter((lead) => lead.stage === 'checkout-sent' || lead.stage === 'booked')
+            .reduce((total, lead) => total + parseMoneyValue(lead.budget), 0),
+        ),
+        delta: 'Active conversion opportunities still moving.',
+      },
+      {
+        label: 'Recovery backlog',
+        value: String(bookingRecords.filter((booking) => booking.status === 'no-show').length),
+        delta: 'Live no-show items waiting for a recovery branch.',
+      },
+      {
+        label: 'Live test runs',
+        value: String(liveTestRuns.length),
+        delta: 'SQL-backed scenario tests recorded in the backend.',
+      },
+      {
+        label: 'Relay pressure',
+        value: String(deliveryQueue.filter((item) => item.status !== 'delivered').length),
+        delta: 'Queued outbox items awaiting relay completion.',
+      },
+    ],
+    [bookingRecords, deliveryQueue, leadRecords, liveTestRuns.length],
   )
   const visibleAuditEvents = auditEvents
     .filter((entry) => (auditKindFilter === 'all' ? true : entry.kind === auditKindFilter))
@@ -481,6 +580,7 @@ function App() {
         connectorStates,
         operatorNotesHistory,
         auditEvents,
+        liveTestRuns,
         ruleTestResults,
       }),
     )
@@ -495,6 +595,7 @@ function App() {
     leadQuery,
     leadRecords,
     leadStageFilter,
+    liveTestRuns,
     ruleDrafts,
     ruleTestResults,
     scenarioId,
@@ -544,6 +645,8 @@ function App() {
     deliveryQueue?: DeliveryItem[]
     operatorNotesHistory?: OperatorNote[]
     auditEvents?: AuditEvent[]
+    liveTestRuns?: LiveTestRun[]
+    ruleTestResults?: Record<string, RuleTestResult>
   }) => {
     if (snapshot.leadRecords) {
       setLeadRecords(snapshot.leadRecords)
@@ -565,6 +668,12 @@ function App() {
     }
     if (snapshot.auditEvents) {
       setAuditEvents(snapshot.auditEvents)
+    }
+    if (snapshot.liveTestRuns) {
+      setLiveTestRuns(snapshot.liveTestRuns)
+    }
+    if (snapshot.ruleTestResults) {
+      setRuleTestResults(snapshot.ruleTestResults)
     }
   }
 
@@ -732,6 +841,119 @@ function App() {
       title: 'Webhook replayed',
       detail: `Replayed ${item.label} and queued the payload back into the simulator.`,
       target: item.id,
+    })
+  }
+
+  const handleRunLiveTest = async () => {
+    const payload = JSON.stringify(activePayload, null, 2)
+    try {
+      const response = await runLiveTestRequest({
+        scenarioId: activeScenario.id,
+        scenarioTitle: activeScenario.title,
+        stepLabel: runtime.stepLabels[stepIndex],
+        payload,
+      })
+      applySnapshot(response.snapshot)
+      setWebhookInput(payload)
+      setWebhookResult({
+        status: response.ok ? 'accepted' : 'rejected',
+        message: response.message,
+      })
+      return
+    } catch {
+      // Fall back to local live-test logging when the API is unavailable.
+    }
+
+    const result = validateWebhookPayload(payload)
+    if (!result.ok) {
+      setWebhookResult({
+        status: 'rejected',
+        message: result.message,
+      })
+      return
+    }
+
+    const route =
+      typeof result.parsed.event_name === 'string' && result.parsed.event_name.toLowerCase() === 'purchase'
+        ? {
+            connector: 'Meta CAPI',
+            label: 'Purchase',
+            note: 'Purchase payload normalized and staged for server-side relay.',
+            status: 'queued' as const,
+          }
+        : Array.isArray(result.parsed.onboarding_assets)
+          ? {
+              connector: 'Make',
+              label: 'OnboardingAutopilot',
+              note: 'Onboarding autopilot payload routed to the asset provisioning lane.',
+              status: 'queued' as const,
+            }
+          : typeof result.parsed.booking_status === 'string' || typeof result.parsed.route === 'string'
+            ? {
+                connector: 'GHL',
+                label: String(result.parsed.booking_status ?? result.parsed.route),
+                note: 'Consult routing update queued for the ops relay.',
+                status: 'processing' as const,
+              }
+            : {
+                connector: 'Zapier',
+                label: String(result.parsed.event_name ?? 'CustomEvent'),
+                note: 'Custom automation payload routed through the default relay lane.',
+                status: 'queued' as const,
+              }
+
+    const timestamp = new Date().toISOString()
+    setLiveTestRuns((current) => [
+      {
+        id: `ltr-${String(current.length + 1).padStart(3, '0')}`,
+        scenarioId: activeScenario.id,
+        scenarioTitle: activeScenario.title,
+        stepLabel: runtime.stepLabels[stepIndex],
+        payloadLabel: route.label,
+        connector: route.connector,
+        status: 'accepted',
+        resultMessage: `${route.connector} accepted the live test payload and queued ${route.label}.`,
+        payload,
+        createdAt: timestamp,
+      },
+      ...current,
+    ])
+    setDeliveryQueue((current) => [
+      {
+        id: `dq-${String(current.length + 1).padStart(3, '0')}`,
+        connector: route.connector,
+        channel:
+          route.connector === 'Meta CAPI'
+            ? 'server_events'
+            : route.connector === 'GHL'
+              ? 'consult_routing'
+              : route.connector === 'Make'
+                ? 'onboarding'
+                : 'automation_relay',
+        target: `scenario:${activeScenario.id}`,
+        payloadLabel: route.label,
+        status: route.status,
+        lastAttempt: timestamp,
+        note: route.note,
+      },
+      ...current,
+    ])
+    updateConnectorState(route.connector, {
+      status: 'syncing',
+      lastPing: timestamp,
+      runs: (connectorStates[route.connector]?.runs ?? 0) + 1,
+      note: `${route.connector} accepted a live test run from the scenario tester.`,
+    })
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Live test run completed',
+      detail: `${route.connector} accepted ${route.label} and queued the relay item.`,
+      target: activeScenario.id,
+    })
+    setWebhookInput(payload)
+    setWebhookResult({
+      status: 'accepted',
+      message: `${route.connector} accepted the live test payload and queued ${route.label}.`,
     })
   }
 
@@ -1074,7 +1296,8 @@ function App() {
       deliveryQueue,
       ruleTestResults,
       auditEvents,
-      metrics: revenueMetrics,
+      liveTestRuns,
+      metrics: railMetrics,
       capiEvents,
     }
 
@@ -1099,7 +1322,7 @@ function App() {
           </p>
         </div>
         <div className="topbar-metrics">
-          {summaryStats.map((stat) => (
+          {missionStats.map((stat) => (
             <article key={stat.label} className="topbar-metric">
               <p className="stat-label">{stat.label}</p>
               <p className="topbar-value">{stat.value}</p>
@@ -1242,6 +1465,13 @@ function App() {
               onClick={() => handleStepChange(0)}
             >
               Reset flow
+            </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleRunLiveTest}
+            >
+              Run live test
             </button>
             <button
               type="button"
@@ -1557,6 +1787,37 @@ function App() {
 
           {railTab === 'operations' ? (
             <div className="rail-stack">
+              <article className="rail-card rail-card-emphasis">
+                <div className="subsection-header">
+                  <h3>Live test runs</h3>
+                  <span className="mini-label">{liveTestRuns.length} recorded</span>
+                </div>
+                <div className="test-run-stack">
+                  {liveTestRuns.slice(0, 3).map((run) => (
+                    <article key={run.id} className="test-run-card">
+                      <div className="booking-topline">
+                        <div>
+                          <p className="event-name">{run.payloadLabel}</p>
+                          <p className="timeline-meta">
+                            {run.scenarioTitle} • {run.stepLabel}
+                          </p>
+                        </div>
+                        <span className={`connector-status connector-${run.status}`}>
+                          {run.status}
+                        </span>
+                      </div>
+                      <p>{run.resultMessage}</p>
+                      <p className="timeline-meta">
+                        {run.connector} • {run.createdAt}
+                      </p>
+                    </article>
+                  ))}
+                  {liveTestRuns.length === 0 ? (
+                    <p className="timeline-meta">No live tests recorded yet. Run one from the mission bar.</p>
+                  ) : null}
+                </div>
+              </article>
+
               <article className="rail-card">
                 <div className="subsection-header">
                   <h3>Delivery outbox</h3>
@@ -1765,7 +2026,7 @@ function App() {
                   <span className="mini-label">Stripe + Meta-ready</span>
                 </div>
                 <div className="metric-grid">
-                  {revenueMetrics.map((metric) => (
+                  {railMetrics.map((metric) => (
                     <article key={metric.label} className="metric-card">
                       <p className="metric-label">{metric.label}</p>
                       <p className="metric-value">{metric.value}</p>

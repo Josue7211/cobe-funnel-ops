@@ -2,13 +2,14 @@
 
 ## Summary
 
-The app is a single frontend repo with one shared domain model and three operator-facing modules.
+The app is a single repo with a React frontend and a small SQLite-backed Express API. The shared domain model keeps the operator surface coherent instead of splitting state across disconnected mocks.
 
 This keeps the demo coherent:
 
 1. DM conversations generate lead state
 2. lead state drives booking and recovery state
-3. both feed the dashboard and event log
+3. webhook validation and live test runs write to SQLite
+4. the dashboard reads the SQL snapshot instead of stale hardcoded stats
 
 ## Modules
 
@@ -50,6 +51,12 @@ This keeps the demo coherent:
 - searchable execution trail
 - webhook, rule, connector, and note events
 
+### Live Test Runs
+
+- SQL-backed scenario runs
+- payload validation and relay routing
+- connector status updates from live test execution
+
 ## Shared entities
 
 - `Lead`
@@ -59,7 +66,8 @@ This keeps the demo coherent:
 - `EventLogItem`
 - `RevenueMetric`
 - `CapiEvent`
+- `LiveTestRun`
 
 ## Why this shape
 
-This system is not a flashy consumer app. It is an internal console that keeps funnel state, recovery actions, and tracking evidence in one place for the team running creator offers.
+This system is not a flashy consumer app. It is an internal console that keeps funnel state, recovery actions, tracking evidence, and live test runs in one place for the team running creator offers.

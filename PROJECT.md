@@ -18,6 +18,7 @@ Build a single lightweight web app that demonstrates the exact workflow describe
 - DM module clearly shows lead intake, tags, funnel stage, and automation outcomes
 - recovery module clearly shows booked, reminded, no-show, and recovered states
 - dashboard clearly shows revenue, KPIs, and event naming discipline
+- backend persists state in SQL and supports live test runs
 - repo includes plain-English docs and a week-one proposal
 - build runs locally with no paid integrations required
 

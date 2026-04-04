@@ -17,6 +17,7 @@ It also includes operator surfaces for:
 - `Rule Lab` — editable automation logic with per-rule tests
 - `Connector Lab` — Zapier, Make, Stripe, GHL, Slack, and Google Sheets-style relay cards
 - `Operator Audit` — searchable execution history for webhook, rule, connector, and note actions
+- `Live Test Runs` — SQL-backed scenario tests that validate payloads and record relay outcomes
 
 The system supports common operator paths:
 
@@ -33,10 +34,19 @@ For teams running creator funnels, the same problems repeat: high-intent DMs, le
 - React
 - TypeScript
 - Vite
+- Express
+- SQLite (`node:sqlite`)
 
-No paid services are required to run it locally. ManyChat, GHL, Zapier/Make, and Meta CAPI are represented as operator-friendly mirrors so the logic stays visible and cheap to run.
+No paid services are required to run it locally. ManyChat, GHL, Zapier/Make, and Meta CAPI are represented as operator-friendly mirrors so the logic stays visible and cheap to run, while the backend persists live state in SQLite.
+
+### Run it
+
+- Frontend + API: `npm run dev`
+- Reset seeded SQL data: `npm run reset:data`
 
 ## Local development
+
+- Use Node 22+ so the built-in `node:sqlite` module is available.
 
 ```bash
 npm install

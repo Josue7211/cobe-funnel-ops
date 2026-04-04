@@ -6,6 +6,8 @@ export type ApiSnapshot = {
   deliveryQueue: unknown[]
   operatorNotesHistory: unknown[]
   auditEvents: unknown[]
+  liveTestRuns: unknown[]
+  ruleTestResults: Record<string, unknown>
 }
 
 async function request(path: string, init?: RequestInit) {
@@ -59,5 +61,17 @@ export async function logNote(note: string, scenarioId: string, stepLabel: strin
   return request('/api/notes', {
     method: 'POST',
     body: JSON.stringify({ note, scenarioId, stepLabel }),
+  })
+}
+
+export async function runLiveTest(input: {
+  scenarioId: string
+  scenarioTitle: string
+  stepLabel: string
+  payload: string
+}) {
+  return request('/api/tests/run', {
+    method: 'POST',
+    body: JSON.stringify(input),
   })
 }
