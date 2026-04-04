@@ -104,6 +104,23 @@ type WorkbenchTab = 'funnel' | 'recovery' | 'payload'
 
 type RailTab = 'operations' | 'audit' | 'automation' | 'metrics'
 
+const leadStagePriority: Record<FunnelStage, number> = {
+  'no-show': 0,
+  'checkout-sent': 1,
+  booked: 2,
+  engaged: 3,
+  recovery: 4,
+  new: 5,
+  won: 6,
+}
+
+const deliveryStatusPriority: Record<DeliveryStatus, number> = {
+  failed: 0,
+  queued: 1,
+  processing: 2,
+  delivered: 3,
+}
+
 const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
   (accumulator, connector) => {
     accumulator[connector.name] = {
@@ -323,9 +340,6 @@ function App() {
   }))
   const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
   const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
-  const [showExpandedTimeline, setShowExpandedTimeline] = useState(
-    persisted?.showExpandedTimeline ?? false,
-  )
   const [leadQuery, setLeadQuery] = useState(persisted?.leadQuery ?? '')
   const [leadStageFilter, setLeadStageFilter] = useState<FunnelStage | 'all'>(
     persisted?.leadStageFilter ?? 'all',
@@ -374,8 +388,10 @@ function App() {
     status: 'accepted' | 'rejected'
     message: string
   } | null>(null)
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('funnel')
-  const [railTab, setRailTab] = useState<RailTab>('operations')
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>(
+    persisted?.workbenchTab ?? 'funnel',
+  )
+  const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? 'operations')
 
   const activeScenario = useMemo(
     () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
@@ -404,6 +420,22 @@ function App() {
   const filteredDeliveryQueue = deliveryQueue.filter((item) =>
     deliveryFilter === 'all' ? true : item.status === deliveryFilter,
   )
+  const prioritizedLeads = [...filteredLeads].sort((left, right) => {
+    const stageDifference = leadStagePriority[left.stage] - leadStagePriority[right.stage]
+    if (stageDifference !== 0) {
+      return stageDifference
+    }
+
+    return left.lastTouch.localeCompare(right.lastTouch)
+  })
+  const prioritizedDeliveryQueue = [...filteredDeliveryQueue].sort((left, right) => {
+    const statusDifference = deliveryStatusPriority[left.status] - deliveryStatusPriority[right.status]
+    if (statusDifference !== 0) {
+      return statusDifference
+    }
+
+    return right.lastAttempt.localeCompare(left.lastAttempt)
+  })
   const leadScenarios = useMemo(
     () =>
       demoScenarios.reduce<Record<string, string>>((accumulator, scenario) => {
@@ -435,11 +467,12 @@ function App() {
       JSON.stringify({
         scenarioId,
         stepIndex,
-        showExpandedTimeline,
         leadQuery,
         leadStageFilter,
         deliveryFilter,
         operatorNotes,
+        workbenchTab,
+        railTab,
         leadRecords,
         bookingRecords,
         deliveryQueue,
@@ -465,7 +498,8 @@ function App() {
     ruleDrafts,
     ruleTestResults,
     scenarioId,
-    showExpandedTimeline,
+    workbenchTab,
+    railTab,
     stepIndex,
     webhookHistory,
   ])
@@ -574,12 +608,11 @@ function App() {
   }
 
   const handleScenarioChange = (nextScenarioId: string) => {
-    const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
-    const nextRuntime = scenarioRuntimes[nextScenario.id]
+      const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
+      const nextRuntime = scenarioRuntimes[nextScenario.id]
     startTransition(() => {
       setScenarioId(nextScenarioId)
       setStepIndex(0)
-      setShowExpandedTimeline(false)
       setWebhookInput(JSON.stringify(nextRuntime.payloads[0], null, 2))
       setWebhookResult(null)
     })
@@ -1109,9 +1142,17 @@ function App() {
             </select>
           </div>
           <div className="lead-queue">
-            {filteredLeads.map((lead) => {
+            {prioritizedLeads.map((lead) => {
               const scenarioForLead = leadScenarios[lead.id]
               const isActive = lead.id === activeLead.id
+              const priorityLabel =
+                lead.stage === 'no-show'
+                  ? 'SLA red'
+                  : lead.stage === 'checkout-sent'
+                    ? 'SLA amber'
+                    : lead.stage === 'booked'
+                      ? 'SLA watch'
+                      : 'SLA normal'
 
               return (
                 <button
@@ -1129,9 +1170,11 @@ function App() {
                       <p className="mini-label">{lead.source}</p>
                       <strong>{lead.name}</strong>
                     </div>
-                    <span className="stage-badge">{lead.stage}</span>
+                    <span className="stage-badge">{priorityLabel}</span>
                   </div>
-                  <p className="timeline-meta">{lead.handle} • {lead.offer}</p>
+                  <p className="timeline-meta">
+                    {lead.handle} • {lead.offer} • {lead.stage}
+                  </p>
                   <p className="lead-queue-note">{lead.nextAction}</p>
                 </button>
               )
@@ -1535,7 +1578,7 @@ function App() {
                   </select>
                 </div>
                 <div className="queue-grid">
-                  {(activeLeadQueue.length ? activeLeadQueue : filteredDeliveryQueue).map((item) => (
+                  {(activeLeadQueue.length ? activeLeadQueue : prioritizedDeliveryQueue).map((item) => (
                     <article key={item.id} className="queue-card">
                       <div className="booking-topline">
                         <div>
