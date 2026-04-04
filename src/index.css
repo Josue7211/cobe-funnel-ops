@@ -1,18 +1,23 @@
 :root {
-  color-scheme: light;
-  --canvas: #f5efe4;
-  --surface: rgba(255, 251, 244, 0.92);
-  --surface-alt: rgba(255, 255, 255, 0.72);
-  --border: rgba(42, 36, 29, 0.1);
-  --border-strong: rgba(42, 36, 29, 0.2);
-  --text-main: #17161a;
-  --text-soft: #5f5a61;
-  --muted-strong: #7d7380;
-  --accent: #151f35;
-  --accent-soft: rgba(25, 56, 122, 0.11);
-  --accent-deep: #1f3e86;
-  --shadow-soft: 0 22px 60px rgba(28, 24, 18, 0.08);
-  --display: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  color-scheme: dark;
+  --canvas: #05070d;
+  --canvas-2: #0b1020;
+  --surface: rgba(10, 14, 24, 0.88);
+  --surface-alt: rgba(16, 22, 37, 0.86);
+  --surface-soft: rgba(24, 32, 48, 0.6);
+  --border: rgba(154, 183, 255, 0.12);
+  --border-strong: rgba(177, 205, 255, 0.26);
+  --text-main: #eef3ff;
+  --text-soft: #a3afcf;
+  --muted-strong: #7482aa;
+  --accent: #67d8ff;
+  --accent-soft: rgba(103, 216, 255, 0.14);
+  --accent-deep: #5ba1ff;
+  --warning: #ffbc61;
+  --danger: #ff7f86;
+  --success: #78e1b3;
+  --shadow-soft: 0 20px 70px rgba(0, 0, 0, 0.42);
+  --display: 'Times New Roman', Georgia, serif;
   --sans: 'Trebuchet MS', 'Avenir Next', Avenir, sans-serif;
   --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 
@@ -21,8 +26,10 @@
   font-weight: 400;
   color: var(--text-main);
   background:
-    radial-gradient(circle at top, rgba(247, 199, 138, 0.32), transparent 28%),
-    linear-gradient(180deg, #fbf6ee 0%, #f1e8d8 100%);
+    radial-gradient(circle at 15% 15%, rgba(82, 154, 255, 0.22), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(103, 216, 255, 0.16), transparent 16%),
+    radial-gradient(circle at 68% 84%, rgba(255, 124, 153, 0.14), transparent 20%),
+    linear-gradient(180deg, #05070d 0%, #090d18 46%, #03050a 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -34,6 +41,8 @@
 }
 
 html {
+  min-height: 100%;
+  overflow: hidden;
   scroll-behavior: smooth;
 }
 
@@ -41,6 +50,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow: hidden;
   background: transparent;
 }
 
@@ -57,9 +67,10 @@ select {
 
 #root {
   width: 100%;
-  max-width: none;
+  height: 100svh;
   margin: 0;
-  padding: 1rem 1rem 2rem;
+  padding: 0.75rem;
+  overflow: hidden;
 }
 
 h1,
@@ -78,21 +89,21 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(2.6rem, 5vw, 4.6rem);
-  line-height: 0.96;
+  font-size: clamp(2.7rem, 5vw, 5rem);
+  line-height: 0.95;
 }
 
 h2 {
-  font-size: clamp(1.5rem, 3vw, 2.3rem);
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
   margin-bottom: 0;
 }
 
 h3 {
-  font-size: 1.12rem;
+  font-size: 1.08rem;
 }
 
 @media (max-width: 720px) {
   #root {
-    padding: 0.75rem 0.75rem 1.5rem;
+    padding: 0.5rem;
   }
 }
