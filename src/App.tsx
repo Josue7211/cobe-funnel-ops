@@ -1,4 +1,4 @@
-import { startTransition, useMemo, useState } from 'react'
+import { startTransition, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
   automationRules,
@@ -130,10 +130,36 @@ const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   },
 }
 
+const STORAGE_KEY = 'creator-funnel-ops-state'
+
+function readPersistedState() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 function App() {
-  const [scenarioId, setScenarioId] = useState(demoScenarios[0].id)
-  const [stepIndex, setStepIndex] = useState(0)
-  const [showExpandedTimeline, setShowExpandedTimeline] = useState(false)
+  const persisted = readPersistedState()
+  const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
+  const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
+  const [showExpandedTimeline, setShowExpandedTimeline] = useState(
+    persisted?.showExpandedTimeline ?? false,
+  )
+  const [operatorNotes, setOperatorNotes] = useState(persisted?.operatorNotes ?? '')
+  const [webhookInput, setWebhookInput] = useState(
+    JSON.stringify(scenarioRuntimes[demoScenarios[0].id].payloads[0], null, 2),
+  )
+  const [webhookResult, setWebhookResult] = useState<{
+    status: 'accepted' | 'rejected'
+    message: string
+  } | null>(null)
 
   const activeScenario = useMemo(
     () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
@@ -153,12 +179,91 @@ function App() {
   const activePayload = runtime.payloads[stepIndex]
   const activeMetricValue = runtime.metricValues[stepIndex]
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        scenarioId,
+        stepIndex,
+        showExpandedTimeline,
+        operatorNotes,
+      }),
+    )
+  }, [operatorNotes, scenarioId, showExpandedTimeline, stepIndex])
+
+  const resetWebhookState = (nextPayloadText: string) => {
+    setWebhookInput(nextPayloadText)
+    setWebhookResult(null)
+  }
+
   const handleScenarioChange = (nextScenarioId: string) => {
+    const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
+    const nextRuntime = scenarioRuntimes[nextScenario.id]
     startTransition(() => {
       setScenarioId(nextScenarioId)
       setStepIndex(0)
       setShowExpandedTimeline(false)
+      resetWebhookState(JSON.stringify(nextRuntime.payloads[0], null, 2))
     })
+  }
+
+  const handleStepChange = (nextStepIndex: number) => {
+    const boundedStep = Math.max(0, Math.min(nextStepIndex, runtime.stepLabels.length - 1))
+    setStepIndex(boundedStep)
+    resetWebhookState(JSON.stringify(runtime.payloads[boundedStep], null, 2))
+  }
+
+  const handleWebhookValidate = () => {
+    try {
+      const parsed = JSON.parse(webhookInput) as Record<string, unknown>
+      const hasRecognizedSignal =
+        typeof parsed.event_name === 'string' ||
+        typeof parsed.booking_status === 'string' ||
+        typeof parsed.route === 'string' ||
+        Array.isArray(parsed.onboarding_assets)
+
+      if (!hasRecognizedSignal) {
+        setWebhookResult({
+          status: 'rejected',
+          message: 'Rejected: payload is valid JSON but missing a recognized automation signal.',
+        })
+        return
+      }
+
+      setWebhookResult({
+        status: 'accepted',
+        message: 'Accepted: payload passes schema check and is ready for the simulated automation relay.',
+      })
+    } catch {
+      setWebhookResult({
+        status: 'rejected',
+        message: 'Rejected: payload is not valid JSON.',
+      })
+    }
+  }
+
+  const handleExport = () => {
+    const payload = {
+      scenario: activeScenario.title,
+      step: runtime.stepLabels[stepIndex],
+      lead: activeLead,
+      bookingStatus: runtime.bookingStatuses[stepIndex],
+      visibleEvents: scenarioEvents,
+      webhookPayload: activePayload,
+      notes: operatorNotes,
+    }
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${activeScenario.id}-proof.json`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -272,7 +377,7 @@ function App() {
                 <button
                   type="button"
                   className="button button-secondary button-small"
-                  onClick={() => setStepIndex((current) => Math.max(current - 1, 0))}
+                  onClick={() => handleStepChange(stepIndex - 1)}
                   disabled={stepIndex === 0}
                 >
                   Previous step
@@ -280,9 +385,7 @@ function App() {
                 <button
                   type="button"
                   className="button button-primary button-small"
-                  onClick={() =>
-                    setStepIndex((current) => Math.min(current + 1, runtime.stepLabels.length - 1))
-                  }
+                  onClick={() => handleStepChange(stepIndex + 1)}
                   disabled={stepIndex === runtime.stepLabels.length - 1}
                 >
                   Advance flow
@@ -290,7 +393,14 @@ function App() {
                 <button
                   type="button"
                   className="button button-secondary button-small"
-                  onClick={() => setStepIndex(0)}
+                  onClick={handleExport}
+                >
+                  Export proof
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => handleStepChange(0)}
                 >
                   Reset
                 </button>
@@ -420,7 +530,37 @@ function App() {
             </div>
             <span className="status-pill">Server-side ready</span>
           </div>
-          <pre className="payload-view">{JSON.stringify(activePayload, null, 2)}</pre>
+          <div className="payload-controls">
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => setWebhookInput(JSON.stringify(activePayload, null, 2))}
+            >
+              Reset to template
+            </button>
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={handleWebhookValidate}
+            >
+              Validate payload
+            </button>
+          </div>
+          <textarea
+            className="payload-editor"
+            value={webhookInput}
+            onChange={(event) => setWebhookInput(event.target.value)}
+            spellCheck={false}
+          />
+          {webhookResult ? (
+            <p
+              className={`webhook-result ${
+                webhookResult.status === 'accepted' ? 'webhook-accepted' : 'webhook-rejected'
+              }`}
+            >
+              {webhookResult.message}
+            </p>
+          ) : null}
         </section>
 
         <section className="panel">
@@ -545,7 +685,7 @@ function App() {
             <button
               type="button"
               className="button button-secondary button-small"
-              onClick={() => setShowExpandedTimeline((current) => !current)}
+              onClick={() => setShowExpandedTimeline((current: boolean) => !current)}
             >
               {showExpandedTimeline ? 'Show scenario only' : 'Show full event trail'}
             </button>
@@ -564,6 +704,22 @@ function App() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Operator Notes</p>
+              <h2>Session memory</h2>
+            </div>
+            <span className="status-pill">Persisted locally</span>
+          </div>
+          <textarea
+            className="notes-editor"
+            value={operatorNotes}
+            onChange={(event) => setOperatorNotes(event.target.value)}
+            placeholder="Capture what changed, what to ship next, or how this scenario maps to a client funnel."
+          />
         </section>
       </main>
     </div>

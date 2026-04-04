@@ -201,6 +201,13 @@
   margin-top: 1rem;
 }
 
+.payload-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
 .panel {
   border-radius: 28px;
   padding: 1.5rem;
@@ -401,6 +408,43 @@
   font-size: 0.85rem;
   line-height: 1.5;
   overflow: auto;
+}
+
+.payload-editor,
+.notes-editor {
+  width: 100%;
+  min-height: 220px;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: #151a22;
+  color: #d9e4ff;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.notes-editor {
+  min-height: 180px;
+}
+
+.webhook-result {
+  margin: 0.85rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  font-weight: 600;
+}
+
+.webhook-accepted {
+  background: rgba(51, 129, 84, 0.15);
+  color: #2f7249;
+}
+
+.webhook-rejected {
+  background: rgba(190, 76, 41, 0.14);
+  color: #a03d1f;
 }
 
 .scenario-card {
