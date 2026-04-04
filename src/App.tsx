@@ -13,53 +13,186 @@ import {
   revenueMetrics,
   summaryStats,
 } from './data'
+import type { FunnelStage } from './types'
+
+type ScenarioRuntime = {
+  stepLabels: string[]
+  leadStages: FunnelStage[]
+  bookingStatuses: string[]
+  visibleMessageCount: number[]
+  visibleEventIds: string[][]
+  payloads: object[]
+  metricLabel: string
+  metricValues: string[]
+}
+
+const scenarioRuntimes: Record<string, ScenarioRuntime> = {
+  'scenario-001': {
+    stepLabels: ['Inbound DM', 'Tag + qualify', 'Checkout sent', 'Purchase ready'],
+    leadStages: ['new', 'engaged', 'checkout-sent', 'won'],
+    bookingStatuses: ['reminded', 'reminded', 'reminded', 'recovered'],
+    visibleMessageCount: [1, 2, 4, 4],
+    visibleEventIds: [['evt-001'], ['evt-001', 'evt-002'], ['evt-001', 'evt-002', 'evt-003'], ['evt-001', 'evt-002', 'evt-003']],
+    payloads: [
+      {
+        event_name: 'Lead',
+        source: 'instagram_dm',
+        trigger: 'pricing_keyword',
+        lead_handle: '@miamoves',
+      },
+      {
+        event_name: 'Lead',
+        tags: ['dm-sprint', 'warm', 'challenge'],
+        owner: 'Alex',
+        funnel_stage: 'engaged',
+      },
+      {
+        event_name: 'InitiateCheckout',
+        provider: 'stripe',
+        amount: 49,
+        currency: 'USD',
+        payment_link_state: 'sent',
+      },
+      {
+        event_name: 'Purchase',
+        provider: 'stripe',
+        value: 49,
+        offer: 'Low-ticket challenge',
+        capi_state: 'ready',
+      },
+    ],
+    metricLabel: 'Revenue influenced',
+    metricValues: ['$0', '$0', '$49 pending', '$49 closed'],
+  },
+  'scenario-002': {
+    stepLabels: ['Call requested', 'Booked + routed', 'No-show detected', 'Recovery queued'],
+    leadStages: ['engaged', 'booked', 'no-show', 'recovery'],
+    bookingStatuses: ['booked', 'reminded', 'no-show', 'recovered'],
+    visibleMessageCount: [2, 4, 4, 4],
+    visibleEventIds: [['evt-004'], ['evt-004'], ['evt-004'], ['evt-004', 'evt-005']],
+    payloads: [
+      {
+        route: 'consult',
+        owner_pool: ['Nina', 'Alex'],
+        routing_reason: 'high-ticket intent',
+      },
+      {
+        booking_status: 'booked',
+        reminder_sequence: ['24h', '2h', '30m'],
+        closer: 'Nina',
+      },
+      {
+        booking_status: 'no-show',
+        grace_window_minutes: 10,
+        next_state: 'recovery',
+      },
+      {
+        event_name: 'Schedule',
+        recovery_branch: 'voice_note_plus_reschedule',
+        proof_stack: true,
+        expected_outcome: 'rebook',
+      },
+    ],
+    metricLabel: 'Recovery value',
+    metricValues: ['$0 protected', '$0 protected', '$2.5k at risk', '$2.5k recovered path'],
+  },
+  'scenario-003': {
+    stepLabels: ['Payment received', 'Subscriber promoted', 'Onboarding autopilot', 'CAPI purchase ready'],
+    leadStages: ['won', 'won', 'won', 'won'],
+    bookingStatuses: ['recovered', 'recovered', 'recovered', 'recovered'],
+    visibleMessageCount: [1, 2, 2, 2],
+    visibleEventIds: [['evt-006'], ['evt-006'], ['evt-006', 'evt-007'], ['evt-006', 'evt-007', 'evt-008']],
+    payloads: [
+      {
+        event_name: 'Purchase',
+        provider: 'stripe_webhook',
+        offer: 'Subscription',
+        value: 97,
+      },
+      {
+        customer_state: 'subscriber',
+        next_action: 'onboarding',
+        upsell_ready: true,
+      },
+      {
+        onboarding_assets: ['folder_template', 'sop_links', 'welcome_message'],
+        status: 'started',
+      },
+      {
+        event_name: 'Purchase',
+        destination: 'meta_server_events',
+        match_keys: ['em', 'ph', 'external_id', 'value'],
+        payload_status: 'ready',
+      },
+    ],
+    metricLabel: 'Ops time saved',
+    metricValues: ['0 min', '10 min saved', '30 min saved', '45 min saved'],
+  },
+}
 
 function App() {
   const [scenarioId, setScenarioId] = useState(demoScenarios[0].id)
+  const [stepIndex, setStepIndex] = useState(0)
   const [showExpandedTimeline, setShowExpandedTimeline] = useState(false)
 
   const activeScenario = useMemo(
     () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
     [scenarioId],
   )
+  const runtime = scenarioRuntimes[activeScenario.id]
   const activeLead = leads.find((lead) => lead.id === activeScenario.leadId) ?? leads[0]
   const activeConversation =
     conversations.find((conversation) => conversation.id === activeScenario.conversationId) ??
     conversations[0]
   const activeBooking = bookings.find((booking) => booking.id === activeScenario.bookingId)
-  const scenarioEvents = eventLog.filter((entry) => activeScenario.eventIds.includes(entry.id))
+  const scenarioEvents = eventLog.filter((entry) =>
+    runtime.visibleEventIds[stepIndex]?.includes(entry.id),
+  )
+  const visibleMessages = activeConversation.messages.slice(0, runtime.visibleMessageCount[stepIndex])
+  const progress = ((stepIndex + 1) / runtime.stepLabels.length) * 100
+  const activePayload = runtime.payloads[stepIndex]
+  const activeMetricValue = runtime.metricValues[stepIndex]
+
+  const handleScenarioChange = (nextScenarioId: string) => {
+    startTransition(() => {
+      setScenarioId(nextScenarioId)
+      setStepIndex(0)
+      setShowExpandedTimeline(false)
+    })
+  }
 
   return (
     <div className="app-shell">
       <header className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">Creator Funnel Ops</p>
-          <h1>One operator console for DM automation, recovery logic, and revenue visibility.</h1>
+          <h1>Live operator simulator for funnels, recovery, and reporting.</h1>
           <p className="hero-text">
-            This project is built around the workflow from the job post itself: a ManyChat-style
-            DM sprint funnel, GHL-style no-show recovery, and a Stripe plus Meta-ready reporting
-            layer.
+            This is no longer just a static concept. You can drive the funnel step by step, watch
+            stages change, inspect emitted payloads, and show how manual ops work gets replaced.
           </p>
           <div className="hero-actions">
-            <a href="#scenarios" className="button button-primary">
-              Drive the scenarios
+            <a href="#simulator" className="button button-primary">
+              Run the simulator
             </a>
             <a href="#dashboard" className="button button-secondary">
-              Inspect reporting
+              Inspect metrics
             </a>
           </div>
         </div>
         <div className="hero-card">
           <div className="hero-card-header">
-            <span>Outcome Fit</span>
-            <span>Operator-first</span>
+            <span>Current path</span>
+            <span>{stepIndex + 1}/{runtime.stepLabels.length}</span>
           </div>
-          <ul className="check-list">
-            <li>DM lead qualification and tagging</li>
-            <li>Stripe checkout and payment-state handling</li>
-            <li>Call routing and no-show recovery</li>
-            <li>Onboarding autopilot and CAPI-ready event naming</li>
-          </ul>
+          <h3>{activeScenario.title}</h3>
+          <p>{activeScenario.outcome}</p>
+          <div className="progress-wrap">
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="mini-label">{runtime.stepLabels[stepIndex]}</p>
+          </div>
         </div>
       </header>
 
@@ -82,7 +215,7 @@ function App() {
         ))}
       </section>
 
-      <section id="scenarios" className="scenario-strip">
+      <section id="simulator" className="scenario-strip">
         {demoScenarios.map((scenario) => (
           <article
             key={scenario.id}
@@ -96,12 +229,7 @@ function App() {
               <button
                 type="button"
                 className="button button-secondary button-small"
-                onClick={() =>
-                  startTransition(() => {
-                    setScenarioId(scenario.id)
-                    setShowExpandedTimeline(false)
-                  })
-                }
+                onClick={() => handleScenarioChange(scenario.id)}
               >
                 {scenario.id === activeScenario.id ? 'Selected' : 'Open path'}
               </button>
@@ -127,6 +255,58 @@ function App() {
       </section>
 
       <main className="workspace">
+        <section className="panel panel-wide">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Simulation Controls</p>
+              <h2>Drive the workflow</h2>
+            </div>
+            <span className="status-pill">Operator mode</span>
+          </div>
+          <div className="simulator-grid">
+            <article className="simulator-card">
+              <p className="mini-label">Current step</p>
+              <h3>{runtime.stepLabels[stepIndex]}</h3>
+              <p>{activeScenario.steps[stepIndex]}</p>
+              <div className="control-row">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setStepIndex((current) => Math.max(current - 1, 0))}
+                  disabled={stepIndex === 0}
+                >
+                  Previous step
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={() =>
+                    setStepIndex((current) => Math.min(current + 1, runtime.stepLabels.length - 1))
+                  }
+                  disabled={stepIndex === runtime.stepLabels.length - 1}
+                >
+                  Advance flow
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setStepIndex(0)}
+                >
+                  Reset
+                </button>
+              </div>
+            </article>
+            <article className="simulator-card">
+              <p className="mini-label">{runtime.metricLabel}</p>
+              <p className="metric-value">{activeMetricValue}</p>
+              <p className="stat-note">
+                This panel is here to keep the narration business-facing while you click through
+                the scenario.
+              </p>
+            </article>
+          </div>
+        </section>
+
         <section id="dm-funnel" className="panel panel-wide">
           <div className="panel-header">
             <div>
@@ -145,7 +325,7 @@ function App() {
                 <div className="score-badge">{activeConversation.score} intent score</div>
               </div>
               <div className="message-stack">
-                {activeConversation.messages.map((message) => (
+                {visibleMessages.map((message) => (
                   <div
                     key={message.id}
                     className={`message-bubble ${
@@ -169,7 +349,7 @@ function App() {
                   <p className="mini-label">Lead profile</p>
                   <h3>{activeLead.handle}</h3>
                 </div>
-                <span className="stage-badge">{activeLead.stage}</span>
+                <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
               </div>
               <dl className="detail-grid">
                 <div>
@@ -235,41 +415,40 @@ function App() {
         <section className="panel">
           <div className="panel-header">
             <div>
+              <p className="panel-kicker">Webhook Inspector</p>
+              <h2>Current payload</h2>
+            </div>
+            <span className="status-pill">Server-side ready</span>
+          </div>
+          <pre className="payload-view">{JSON.stringify(activePayload, null, 2)}</pre>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
               <p className="panel-kicker">Module 2</p>
               <h2>Routing + No-Show Recovery</h2>
             </div>
             <span className="status-pill">GHL mirror</span>
           </div>
           <div className="booking-stack">
-            {activeBooking ? (
-              <article className="booking-card booking-highlight">
-                <div className="booking-topline">
-                  <div>
-                    <p className="mini-label">Selected scenario state</p>
-                    <h3>{activeLead.name}</h3>
-                    <p>{activeBooking.slot}</p>
-                  </div>
-                  <span className={`booking-status booking-${activeBooking.status}`}>
-                    {activeBooking.status}
-                  </span>
+            <article className="booking-card booking-highlight">
+              <div className="booking-topline">
+                <div>
+                  <p className="mini-label">Selected scenario state</p>
+                  <h3>{activeLead.name}</h3>
+                  <p>{activeBooking?.slot ?? 'No call slot required'}</p>
                 </div>
-                <p className="booking-owner">Closer: {activeBooking.owner}</p>
-                <p>{activeBooking.recoveryAction}</p>
-              </article>
-            ) : (
-              <article className="booking-card booking-highlight">
-                <div className="booking-topline">
-                  <div>
-                    <p className="mini-label">Selected scenario state</p>
-                    <h3>{activeLead.name}</h3>
-                    <p>No call state required for this flow.</p>
-                  </div>
-                  <span className="booking-status booking-recovered">onboarding</span>
-                </div>
-                <p className="booking-owner">Owner: {activeLead.owner}</p>
-                <p>Payment moves directly into onboarding autopilot and reporting.</p>
-              </article>
-            )}
+                <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
+                  {runtime.bookingStatuses[stepIndex]}
+                </span>
+              </div>
+              <p className="booking-owner">Owner: {activeLead.owner}</p>
+              <p>
+                {activeBooking?.recoveryAction ??
+                  'Payment path skips call handling and moves directly into onboarding automation.'}
+              </p>
+            </article>
 
             {bookings.map((booking) => {
               const lead = leads.find((entry) => entry.id === booking.leadId)
@@ -383,38 +562,6 @@ function App() {
                   {entry.channel} • {entry.timestamp}
                 </p>
               </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel panel-wide">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Audit Trail</p>
-              <h2>Recent Event Log</h2>
-            </div>
-            <span className="status-pill">Operator visibility</span>
-          </div>
-          <div className="event-table">
-            {eventLog.map((entry) => (
-              <div key={entry.id} className="event-row">
-                <div>
-                  <p className="event-name">{entry.event}</p>
-                  <p>{entry.detail}</p>
-                </div>
-                <div>
-                  <p className="mini-label">Lead</p>
-                  <p>{entry.leadId}</p>
-                </div>
-                <div>
-                  <p className="mini-label">Channel</p>
-                  <p>{entry.channel}</p>
-                </div>
-                <div>
-                  <p className={`event-status event-${entry.status}`}>{entry.status}</p>
-                  <p>{entry.timestamp}</p>
-                </div>
-              </div>
             ))}
           </div>
         </section>

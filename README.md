@@ -8,7 +8,7 @@ It demonstrates three connected modules in one operator-facing app:
 - `No-Show Recovery` — a GHL-style booking and recovery workflow with owner routing and follow-up states
 - `Revenue Dashboard` — KPI tracking, Stripe-style payment outcomes, and Meta CAPI-ready server event naming
 
-The app also includes guided operator scenarios so the demo can be driven like a real workflow:
+The app also includes guided operator scenarios and a live simulator layer so the demo can be driven like a real workflow:
 
 - hot DM to checkout
 - booked call to no-show recovery
