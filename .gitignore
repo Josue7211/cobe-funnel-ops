@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only application prep
+docs/APPLICATION_NOTE.md
+docs/LOOM_SCRIPT.md
+docs/WEEK_ONE_FOR_COBE.md

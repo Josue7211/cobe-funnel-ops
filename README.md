@@ -46,10 +46,8 @@ npm run build
 - [PROJECT.md](./PROJECT.md)
 - [ROADMAP.md](./ROADMAP.md)
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- [docs/DEMO_FLOW.md](./docs/DEMO_FLOW.md)
 - [docs/SOP.md](./docs/SOP.md)
-- [docs/WEEK_ONE_FOR_COBE.md](./docs/WEEK_ONE_FOR_COBE.md)
-- [docs/LOOM_SCRIPT.md](./docs/LOOM_SCRIPT.md)
-- [docs/APPLICATION_NOTE.md](./docs/APPLICATION_NOTE.md)
 
 ## Demo framing
 
