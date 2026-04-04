@@ -1,4 +1,4 @@
-# Demo Flow
+# Operator Walkthrough
 
 ## Goal
 
@@ -6,11 +6,11 @@ Walk through the system like an operator showing how the workflow reduces manual
 
 ## Walkthrough structure (2-3 minutes)
 
-1. Open the simulator and pick the scenario (5-10 seconds).
+1. Open the console and choose a lead path (5-10 seconds).
 2. Show the DM funnel state and rule test (45-60 seconds).
 3. Show the connector relay and webhook inbox (30-45 seconds).
 4. Show recovery + dashboard + audit trail (45-60 seconds).
-5. Close on “what would ship next in week one” (10-15 seconds).
+5. Close on “what ships next in week one” (10-15 seconds).
 
 ## Path 1
 

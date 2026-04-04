@@ -62,4 +62,4 @@ This keeps the demo coherent:
 
 ## Why this shape
 
-The job is not asking for a flashy consumer app. It is asking for systems that make creators money and make the internal team faster. A single operator console is the strongest way to show that.
+This system is not a flashy consumer app. It is an internal console that keeps funnel state, recovery actions, and tracking evidence in one place for the team running creator offers.

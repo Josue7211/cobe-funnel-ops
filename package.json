@@ -4,12 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node server/index.js",
+    "dev:web": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "reset:data": "node -e \"import('./server/store.js').then((m)=>m.resetState())\""
   },
   "dependencies": {
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

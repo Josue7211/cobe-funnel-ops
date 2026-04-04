@@ -1,6 +1,14 @@
 import { startTransition, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
+  fetchBootstrap,
+  logNote as logNoteRequest,
+  pingConnector as pingConnectorRequest,
+  retryDelivery as retryDeliveryRequest,
+  runLeadAction,
+  validateWebhook as validateWebhookRequest,
+} from './api'
+import {
   automationRules,
   automationConnectors,
   bookings,
@@ -436,6 +444,24 @@ function App() {
     webhookHistory,
   ])
 
+  useEffect(() => {
+    let cancelled = false
+
+    fetchBootstrap()
+      .then((snapshot) => {
+        if (!cancelled) {
+          applySnapshot(snapshot)
+        }
+      })
+      .catch(() => {
+        // Keep the seeded frontend state when the API is unavailable.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const appendAuditEvent = (
     event: Omit<AuditEvent, 'id' | 'timestamp'>,
     timestamp = new Date().toISOString(),
@@ -448,6 +474,38 @@ function App() {
       },
       ...current,
     ])
+  }
+
+  const applySnapshot = (snapshot: {
+    leadRecords?: Lead[]
+    bookingRecords?: Booking[]
+    webhookHistory?: WebhookEvent[]
+    connectorStates?: Record<string, ConnectorState>
+    deliveryQueue?: DeliveryItem[]
+    operatorNotesHistory?: OperatorNote[]
+    auditEvents?: AuditEvent[]
+  }) => {
+    if (snapshot.leadRecords) {
+      setLeadRecords(snapshot.leadRecords)
+    }
+    if (snapshot.bookingRecords) {
+      setBookingRecords(snapshot.bookingRecords)
+    }
+    if (snapshot.webhookHistory) {
+      setWebhookHistory(snapshot.webhookHistory)
+    }
+    if (snapshot.connectorStates) {
+      setConnectorStates(snapshot.connectorStates)
+    }
+    if (snapshot.deliveryQueue) {
+      setDeliveryQueue(snapshot.deliveryQueue)
+    }
+    if (snapshot.operatorNotesHistory) {
+      setOperatorNotesHistory(snapshot.operatorNotesHistory)
+    }
+    if (snapshot.auditEvents) {
+      setAuditEvents(snapshot.auditEvents)
+    }
   }
 
   const updateConnectorState = (name: string, patch: Partial<ConnectorState>) => {
@@ -546,7 +604,19 @@ function App() {
     }
   }
 
-  const handleWebhookValidate = () => {
+  const handleWebhookValidate = async () => {
+    try {
+      const response = await validateWebhookRequest(webhookInput)
+      applySnapshot(response.snapshot)
+      setWebhookResult({
+        status: 'accepted',
+        message: response.message,
+      })
+      return
+    } catch {
+      // Fall back to local validation when the API is unavailable.
+    }
+
     const result = validateWebhookPayload(webhookInput)
     if (!result.ok) {
       setWebhookResult({
@@ -679,10 +749,18 @@ function App() {
     })
   }
 
-  const handleLogNote = () => {
+  const handleLogNote = async () => {
     const trimmed = operatorNotes.trim()
     if (!trimmed) {
       return
+    }
+
+    try {
+      const response = await logNoteRequest(trimmed, activeScenario.id, runtime.stepLabels[stepIndex])
+      applySnapshot(response.snapshot)
+      return
+    } catch {
+      // Fall back to local note logging when the API is unavailable.
     }
 
     const entry: OperatorNote = {
@@ -701,13 +779,21 @@ function App() {
     })
   }
 
-  const handleLeadAction = (
+  const handleLeadAction = async (
     action: 'checkout' | 'route' | 'no-show' | 'recover' | 'alert',
     leadId: string,
   ) => {
     const lead = leadRecords.find((entry) => entry.id === leadId)
     if (!lead) {
       return
+    }
+
+    try {
+      const response = await runLeadAction(leadId, action)
+      applySnapshot(response.snapshot)
+      return
+    } catch {
+      // Fall back to local state mutations when the API is unavailable.
     }
 
     if (action === 'checkout') {
@@ -849,7 +935,15 @@ function App() {
     })
   }
 
-  const handleDeliveryRetry = (deliveryId: string) => {
+  const handleDeliveryRetry = async (deliveryId: string) => {
+    try {
+      const response = await retryDeliveryRequest(deliveryId)
+      applySnapshot(response.snapshot)
+      return
+    } catch {
+      // Fall back to local retry when the API is unavailable.
+    }
+
     setDeliveryQueue((current) =>
       current.map((item) =>
         item.id === deliveryId
@@ -870,10 +964,18 @@ function App() {
     })
   }
 
-  const handleConnectorPing = (connectorName: string) => {
+  const handleConnectorPing = async (connectorName: string) => {
     const current = connectorStates[connectorName] ?? defaultConnectorStates[connectorName]
     if (!current) {
       return
+    }
+
+    try {
+      const response = await pingConnectorRequest(connectorName)
+      applySnapshot(response.snapshot)
+      return
+    } catch {
+      // Fall back to local connector updates when the API is unavailable.
     }
 
     const nextStatus: ConnectorStatus = 'ready'

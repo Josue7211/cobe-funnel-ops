@@ -19,7 +19,7 @@ Use this console to explain a compact creator-funnel workflow from first DM thro
 9. Open the `Connector Lab` to show where Zapier/Make/GHL/Stripe relay.
 10. End on the `Operator Audit` trail to prove naming discipline and observability.
 
-## Demo framing
+## Operator framing
 
 - Focus on hours saved and dollars influenced.
 - Explain why simulated vendor layers were used:

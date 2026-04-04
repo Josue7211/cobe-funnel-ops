@@ -1,6 +1,6 @@
 .app-shell {
   display: grid;
-  gap: 1.5rem;
+  gap: 1.2rem;
 }
 
 .hero-panel,
@@ -14,10 +14,10 @@
 
 .hero-panel {
   display: grid;
-  gap: 1.5rem;
+  gap: 1.2rem;
   grid-template-columns: 1.7fr 1fr;
   border-radius: 28px;
-  padding: 2rem;
+  padding: 1.6rem;
   background:
     radial-gradient(circle at top left, rgba(255, 143, 77, 0.2), transparent 32%),
     radial-gradient(circle at bottom right, rgba(41, 111, 255, 0.18), transparent 28%),
@@ -50,7 +50,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.9rem;
-  margin-top: 1.5rem;
+  margin-top: 1.1rem;
 }
 
 .button {
@@ -86,7 +86,7 @@
 
 .hero-card {
   border-radius: 24px;
-  padding: 1.25rem;
+  padding: 1.05rem;
   background: rgba(20, 23, 31, 0.84);
   color: #e9edf7;
 }
@@ -149,7 +149,7 @@
 .rule-card,
 .booking-card {
   border-radius: 22px;
-  padding: 1.1rem;
+  padding: 0.95rem;
 }
 
 .stat-value,
@@ -176,50 +176,50 @@
 
 .workspace {
   display: grid;
-  gap: 1rem;
+  gap: 0.9rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .simulator-grid {
   display: grid;
-  gap: 1rem;
+  gap: 0.8rem;
   grid-template-columns: 1.3fr 0.9fr;
-  margin-top: 1rem;
+  margin-top: 0.8rem;
 }
 
 .simulator-card {
   border: 1px solid var(--border);
   border-radius: 22px;
-  padding: 1rem;
+  padding: 0.9rem;
   background: var(--surface-alt);
 }
 
 .control-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
 }
 
 .payload-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
 }
 
 .webhook-history {
-  margin-top: 1.2rem;
+  margin-top: 0.9rem;
   display: grid;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .webhook-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 0.95rem;
+  gap: 0.8rem;
+  padding: 0.6rem 0.85rem;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.75);
@@ -245,7 +245,7 @@
 
 .panel {
   border-radius: 28px;
-  padding: 1.5rem;
+  padding: 1.25rem;
 }
 
 .panel-wide {
@@ -276,8 +276,8 @@
 .funnel-layout,
 .dashboard-layout {
   display: grid;
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: 0.85rem;
+  margin-top: 0.8rem;
 }
 
 .funnel-layout {
@@ -293,14 +293,14 @@
 .capi-card {
   border: 1px solid var(--border);
   border-radius: 24px;
-  padding: 1rem;
+  padding: 0.9rem;
   background: var(--surface-alt);
 }
 
 .message-stack {
   display: grid;
-  gap: 0.8rem;
-  margin: 1rem 0;
+  gap: 0.7rem;
+  margin: 0.8rem 0;
 }
 
 .message-bubble {
@@ -308,7 +308,7 @@
   gap: 0.35rem;
   max-width: 85%;
   border-radius: 18px;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 0.9rem;
 }
 
 .message-bubble small {
@@ -328,14 +328,14 @@
 
 .automation-summary {
   border-top: 1px solid var(--border);
-  padding-top: 1rem;
+  padding-top: 0.85rem;
 }
 
 .detail-grid {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 1rem 0;
+  margin: 0.8rem 0;
 }
 
 .detail-grid dt {
@@ -357,7 +357,7 @@
 .fit-stack,
 .timeline-stack {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .tag-row {
@@ -374,7 +374,7 @@
   border: 1px solid var(--border);
   background: var(--surface-alt);
   display: grid;
-  gap: 0.9rem;
+  gap: 0.7rem;
 }
 
 .rule-card h3,
@@ -468,7 +468,7 @@
 .connector-grid,
 .audit-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .connector-grid {
@@ -478,8 +478,8 @@
 .ops-grid,
 .queue-grid {
   display: grid;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
 }
 
 .ops-grid {
@@ -490,20 +490,20 @@
 .audit-card {
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 1rem;
+  padding: 0.9rem;
   background: var(--surface-alt);
 }
 
 .connector-card {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .connector-topline {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.8rem;
 }
 
 .connector-status,
@@ -569,18 +569,18 @@
 .audit-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
 }
 
 .audit-search,
 .audit-select {
-  min-height: 44px;
-  border-radius: 999px;
+  min-height: 40px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.72);
   color: var(--text-main);
-  padding: 0 1rem;
+  padding: 0 0.85rem;
   font: inherit;
 }
 
@@ -626,24 +626,24 @@
 .queue-card {
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 1rem;
+  padding: 0.9rem;
   background: var(--surface-alt);
 }
 
 .ops-card {
   display: grid;
-  gap: 0.8rem;
+  gap: 0.7rem;
 }
 
 .ops-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .queue-card {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.6rem;
 }
 
 .booking-card {
@@ -692,7 +692,7 @@
 .timeline-card {
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 1rem;
+  padding: 0.9rem;
   background: var(--surface-alt);
 }
 
