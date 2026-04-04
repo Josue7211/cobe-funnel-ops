@@ -34,6 +34,22 @@ This keeps the demo coherent:
 - event log
 - Meta CAPI-ready naming table
 
+### Rule Lab
+
+- editable automation rules
+- per-rule test status
+- operator-visible outcomes
+
+### Connector Lab
+
+- relay cards for Zapier/Make/GHL/Stripe/Slack/Sheets
+- connector status and run counts
+
+### Operator Audit
+
+- searchable execution trail
+- webhook, rule, connector, and note events
+
 ## Shared entities
 
 - `Lead`

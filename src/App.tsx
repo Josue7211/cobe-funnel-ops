@@ -14,7 +14,7 @@ import {
   revenueMetrics,
   summaryStats,
 } from './data'
-import type { FunnelStage } from './types'
+import type { Booking, FunnelStage, Lead } from './types'
 
 type ScenarioRuntime = {
   stepLabels: string[]
@@ -79,6 +79,19 @@ type AuditEvent = {
   timestamp: string
 }
 
+type DeliveryStatus = 'queued' | 'processing' | 'delivered' | 'failed'
+
+type DeliveryItem = {
+  id: string
+  connector: string
+  channel: string
+  target: string
+  payloadLabel: string
+  status: DeliveryStatus
+  lastAttempt: string
+  note: string
+}
+
 const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
   (accumulator, connector) => {
     accumulator[connector.name] = {
@@ -116,6 +129,39 @@ const initialAuditEvents: AuditEvent[] = [
     detail: 'Server-event naming and match keys are ready for the next export.',
     target: 'Meta CAPI',
     timestamp: '09:17:44',
+  },
+]
+
+const defaultDeliveryQueue: DeliveryItem[] = [
+  {
+    id: 'dq-001',
+    connector: 'Stripe',
+    channel: 'checkout_handoff',
+    target: '@miamoves',
+    payloadLabel: 'InitiateCheckout',
+    status: 'delivered',
+    lastAttempt: '09:15:11',
+    note: 'Low-ticket checkout link delivered after DM qualification.',
+  },
+  {
+    id: 'dq-002',
+    connector: 'GHL',
+    channel: 'consult_routing',
+    target: '@evanbuilds',
+    payloadLabel: 'BookingCreated',
+    status: 'processing',
+    lastAttempt: '14:30:02',
+    note: 'Consult lead routed to closer and reminder sequence started.',
+  },
+  {
+    id: 'dq-003',
+    connector: 'Meta CAPI',
+    channel: 'server_events',
+    target: '@jadeteaches',
+    payloadLabel: 'Purchase',
+    status: 'queued',
+    lastAttempt: '08:06:49',
+    note: 'Purchase payload normalized and waiting for the next relay window.',
   },
 ]
 
@@ -256,14 +302,37 @@ function App() {
     ...rule,
     enabled: true,
   }))
+  const defaultLeadRecords: Lead[] = leads.map((lead) => ({
+    ...lead,
+    tags: [...lead.tags],
+  }))
+  const defaultBookingRecords: Booking[] = bookings.map((booking) => ({
+    ...booking,
+  }))
   const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
   const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
   const [showExpandedTimeline, setShowExpandedTimeline] = useState(
     persisted?.showExpandedTimeline ?? false,
   )
+  const [leadQuery, setLeadQuery] = useState(persisted?.leadQuery ?? '')
+  const [leadStageFilter, setLeadStageFilter] = useState<FunnelStage | 'all'>(
+    persisted?.leadStageFilter ?? 'all',
+  )
+  const [deliveryFilter, setDeliveryFilter] = useState<DeliveryStatus | 'all'>(
+    persisted?.deliveryFilter ?? 'all',
+  )
   const [operatorNotes, setOperatorNotes] = useState(persisted?.operatorNotes ?? '')
   const [webhookInput, setWebhookInput] = useState(
     JSON.stringify(scenarioRuntimes[demoScenarios[0].id].payloads[0], null, 2),
+  )
+  const [leadRecords, setLeadRecords] = useState<Lead[]>(
+    Array.isArray(persisted?.leadRecords) ? persisted.leadRecords : defaultLeadRecords,
+  )
+  const [bookingRecords, setBookingRecords] = useState<Booking[]>(
+    Array.isArray(persisted?.bookingRecords) ? persisted.bookingRecords : defaultBookingRecords,
+  )
+  const [deliveryQueue, setDeliveryQueue] = useState<DeliveryItem[]>(
+    Array.isArray(persisted?.deliveryQueue) ? persisted.deliveryQueue : defaultDeliveryQueue,
   )
   const [webhookHistory, setWebhookHistory] = useState<WebhookEvent[]>(
     Array.isArray(persisted?.webhookHistory) ? persisted.webhookHistory : defaultWebhookHistory,
@@ -299,11 +368,11 @@ function App() {
     [scenarioId],
   )
   const runtime = scenarioRuntimes[activeScenario.id]
-  const activeLead = leads.find((lead) => lead.id === activeScenario.leadId) ?? leads[0]
+  const activeLead = leadRecords.find((lead) => lead.id === activeScenario.leadId) ?? leadRecords[0]
   const activeConversation =
     conversations.find((conversation) => conversation.id === activeScenario.conversationId) ??
     conversations[0]
-  const activeBooking = bookings.find((booking) => booking.id === activeScenario.bookingId)
+  const activeBooking = bookingRecords.find((booking) => booking.id === activeScenario.bookingId)
   const scenarioEvents = eventLog.filter((entry) =>
     runtime.visibleEventIds[stepIndex]?.includes(entry.id),
   )
@@ -311,6 +380,16 @@ function App() {
   const progress = ((stepIndex + 1) / runtime.stepLabels.length) * 100
   const activePayload = runtime.payloads[stepIndex]
   const activeMetricValue = runtime.metricValues[stepIndex]
+  const filteredLeads = leadRecords.filter((lead) => {
+    const matchesStage = leadStageFilter === 'all' ? true : lead.stage === leadStageFilter
+    const query = leadQuery.trim().toLowerCase()
+    const haystack =
+      `${lead.name} ${lead.handle} ${lead.source} ${lead.offer} ${lead.owner} ${lead.tags.join(' ')}`.toLowerCase()
+    return matchesStage && haystack.includes(query)
+  })
+  const filteredDeliveryQueue = deliveryQueue.filter((item) =>
+    deliveryFilter === 'all' ? true : item.status === deliveryFilter,
+  )
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -323,7 +402,13 @@ function App() {
         scenarioId,
         stepIndex,
         showExpandedTimeline,
+        leadQuery,
+        leadStageFilter,
+        deliveryFilter,
         operatorNotes,
+        leadRecords,
+        bookingRecords,
+        deliveryQueue,
         webhookHistory,
         ruleDrafts,
         connectorStates,
@@ -333,10 +418,16 @@ function App() {
       }),
     )
   }, [
+    bookingRecords,
+    deliveryFilter,
     operatorNotes,
     auditEvents,
     operatorNotesHistory,
     connectorStates,
+    deliveryQueue,
+    leadQuery,
+    leadRecords,
+    leadStageFilter,
     ruleDrafts,
     ruleTestResults,
     scenarioId,
@@ -374,6 +465,28 @@ function App() {
         },
       }
     })
+  }
+
+  const updateLeadRecord = (leadId: string, patch: Partial<Lead>) => {
+    setLeadRecords((current) =>
+      current.map((lead) => (lead.id === leadId ? { ...lead, ...patch } : lead)),
+    )
+  }
+
+  const updateBookingRecord = (bookingId: string, patch: Partial<Booking>) => {
+    setBookingRecords((current) =>
+      current.map((booking) => (booking.id === bookingId ? { ...booking, ...patch } : booking)),
+    )
+  }
+
+  const addDeliveryItem = (item: Omit<DeliveryItem, 'id'>) => {
+    setDeliveryQueue((current) => [
+      {
+        id: `dq-${String(current.length + 1).padStart(3, '0')}`,
+        ...item,
+      },
+      ...current,
+    ])
   }
 
   const handleScenarioChange = (nextScenarioId: string) => {
@@ -588,6 +701,175 @@ function App() {
     })
   }
 
+  const handleLeadAction = (
+    action: 'checkout' | 'route' | 'no-show' | 'recover' | 'alert',
+    leadId: string,
+  ) => {
+    const lead = leadRecords.find((entry) => entry.id === leadId)
+    if (!lead) {
+      return
+    }
+
+    if (action === 'checkout') {
+      const nextTags = lead.tags.includes('checkout-live')
+        ? lead.tags
+        : [...lead.tags, 'checkout-live']
+      updateLeadRecord(leadId, {
+        stage: 'checkout-sent',
+        tags: nextTags,
+        nextAction: 'Checkout link sent; urgency bump queued at +2h.',
+        lastTouch: 'just now',
+      })
+      addDeliveryItem({
+        connector: 'Stripe',
+        channel: 'checkout_handoff',
+        target: lead.handle,
+        payloadLabel: 'InitiateCheckout',
+        status: 'queued',
+        lastAttempt: new Date().toISOString(),
+        note: 'Generated checkout handoff from the ops queue.',
+      })
+      appendAuditEvent({
+        kind: 'scenario',
+        title: 'Checkout queued',
+        detail: `Promoted ${lead.handle} into checkout-sent and queued a Stripe handoff.`,
+        target: leadId,
+      })
+      return
+    }
+
+    if (action === 'route') {
+      updateLeadRecord(leadId, {
+        owner: 'Nina',
+        stage: 'booked',
+        nextAction: 'Closer assigned; reminders and call prep started.',
+        lastTouch: 'just now',
+      })
+      if (activeBooking) {
+        updateBookingRecord(activeBooking.id, {
+          owner: 'Nina',
+          status: 'booked',
+          recoveryAction: 'Consult booked and reminder sequence started.',
+        })
+      }
+      addDeliveryItem({
+        connector: 'GHL',
+        channel: 'consult_routing',
+        target: lead.handle,
+        payloadLabel: 'BookingCreated',
+        status: 'processing',
+        lastAttempt: new Date().toISOString(),
+        note: 'Lead assigned to closer and routed into booking flow.',
+      })
+      appendAuditEvent({
+        kind: 'scenario',
+        title: 'Closer assigned',
+        detail: `Routed ${lead.handle} to Nina and kicked off the consult branch.`,
+        target: leadId,
+      })
+      return
+    }
+
+    if (action === 'no-show') {
+      const nextTags = lead.tags.includes('no-show') ? lead.tags : [...lead.tags, 'no-show']
+      updateLeadRecord(leadId, {
+        stage: 'no-show',
+        tags: nextTags,
+        nextAction: 'Recovery branch queued with proof stack and reschedule link.',
+        lastTouch: 'just now',
+      })
+      if (activeBooking) {
+        updateBookingRecord(activeBooking.id, {
+          status: 'no-show',
+          recoveryAction: 'Marked no-show and moved into recovery automation.',
+        })
+      }
+      addDeliveryItem({
+        connector: 'Make',
+        channel: 'recovery_sequence',
+        target: lead.handle,
+        payloadLabel: 'NoShowRecovery',
+        status: 'queued',
+        lastAttempt: new Date().toISOString(),
+        note: 'Recovery workflow staged after missed consult attendance.',
+      })
+      appendAuditEvent({
+        kind: 'scenario',
+        title: 'No-show escalated',
+        detail: `Moved ${lead.handle} into no-show recovery and queued the sequence.`,
+        target: leadId,
+      })
+      return
+    }
+
+    if (action === 'recover') {
+      updateLeadRecord(leadId, {
+        stage: 'recovery',
+        nextAction: 'Recovered; waiting on rebook confirmation.',
+        lastTouch: 'just now',
+      })
+      if (activeBooking) {
+        updateBookingRecord(activeBooking.id, {
+          status: 'recovered',
+          recoveryAction: 'Recovered with proof stack and one-click rebook.',
+        })
+      }
+      addDeliveryItem({
+        connector: 'Meta CAPI',
+        channel: 'server_events',
+        target: lead.handle,
+        payloadLabel: 'Schedule',
+        status: 'queued',
+        lastAttempt: new Date().toISOString(),
+        note: 'Recovered consult status prepared for server-side reporting.',
+      })
+      appendAuditEvent({
+        kind: 'scenario',
+        title: 'Lead recovered',
+        detail: `Recovered ${lead.handle} and prepared reporting payloads for the new booking path.`,
+        target: leadId,
+      })
+      return
+    }
+
+    addDeliveryItem({
+      connector: 'Slack',
+      channel: 'team_alert',
+      target: lead.handle,
+      payloadLabel: 'HotLeadAlert',
+      status: 'delivered',
+      lastAttempt: new Date().toISOString(),
+      note: 'Hot lead alert sent to the team for manual assist.',
+    })
+    appendAuditEvent({
+      kind: 'connector',
+      title: 'Slack alert sent',
+      detail: `Pushed a manual assist alert for ${lead.handle}.`,
+      target: leadId,
+    })
+  }
+
+  const handleDeliveryRetry = (deliveryId: string) => {
+    setDeliveryQueue((current) =>
+      current.map((item) =>
+        item.id === deliveryId
+          ? {
+              ...item,
+              status: 'delivered',
+              lastAttempt: new Date().toISOString(),
+              note: `${item.connector} retried successfully from the outbox.`,
+            }
+          : item,
+      ),
+    )
+    appendAuditEvent({
+      kind: 'connector',
+      title: 'Delivery retried',
+      detail: `Outbox item ${deliveryId} was retried and marked delivered.`,
+      target: deliveryId,
+    })
+  }
+
   const handleConnectorPing = (connectorName: string) => {
     const current = connectorStates[connectorName] ?? defaultConnectorStates[connectorName]
     if (!current) {
@@ -632,6 +914,9 @@ function App() {
       webhookHistory,
       ruleDrafts,
       connectorStates,
+      leadRecords,
+      bookingRecords,
+      deliveryQueue,
       ruleTestResults,
       auditEvents,
       metrics: revenueMetrics,
@@ -879,6 +1164,99 @@ function App() {
           </div>
         </section>
 
+        <section className="panel panel-wide">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Ops Queue</p>
+              <h2>Live lead operations</h2>
+            </div>
+            <span className="status-pill">{filteredLeads.length} visible leads</span>
+          </div>
+          <div className="audit-toolbar">
+            <input
+              className="audit-search"
+              type="search"
+              value={leadQuery}
+              onChange={(event) => setLeadQuery(event.target.value)}
+              placeholder="Search leads, handles, offers, owners, or tags"
+            />
+            <select
+              className="audit-select"
+              value={leadStageFilter}
+              onChange={(event) => setLeadStageFilter(event.target.value as FunnelStage | 'all')}
+            >
+              <option value="all">All stages</option>
+              <option value="new">New</option>
+              <option value="engaged">Engaged</option>
+              <option value="checkout-sent">Checkout sent</option>
+              <option value="booked">Booked</option>
+              <option value="no-show">No-show</option>
+              <option value="recovery">Recovery</option>
+              <option value="won">Won</option>
+            </select>
+          </div>
+          <div className="ops-grid">
+            {filteredLeads.map((lead) => (
+              <article key={lead.id} className="ops-card">
+                <div className="lead-header">
+                  <div>
+                    <p className="mini-label">{lead.source}</p>
+                    <h3>{lead.name}</h3>
+                    <p className="timeline-meta">{lead.handle} • {lead.offer}</p>
+                  </div>
+                  <span className="stage-badge">{lead.stage}</span>
+                </div>
+                <p className="booking-owner">Owner: {lead.owner}</p>
+                <p>{lead.nextAction}</p>
+                <div className="tag-row">
+                  {lead.tags.map((tag) => (
+                    <span key={tag} className="tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <div className="ops-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleLeadAction('checkout', lead.id)}
+                  >
+                    Queue checkout
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleLeadAction('route', lead.id)}
+                  >
+                    Route closer
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleLeadAction('no-show', lead.id)}
+                  >
+                    Mark no-show
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleLeadAction('recover', lead.id)}
+                  >
+                    Recover
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-primary button-small"
+                    onClick={() => handleLeadAction('alert', lead.id)}
+                  >
+                    Send alert
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
         <section className="panel">
           <div className="panel-header">
             <div>
@@ -1014,6 +1392,57 @@ function App() {
                 </article>
               )
             })}
+          </div>
+        </section>
+
+        <section className="panel panel-wide">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Delivery Outbox</p>
+              <h2>Connector run queue</h2>
+            </div>
+            <span className="status-pill">{filteredDeliveryQueue.length} visible runs</span>
+          </div>
+          <div className="audit-toolbar">
+            <select
+              className="audit-select"
+              value={deliveryFilter}
+              onChange={(event) => setDeliveryFilter(event.target.value as DeliveryStatus | 'all')}
+            >
+              <option value="all">All statuses</option>
+              <option value="queued">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="delivered">Delivered</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+          <div className="queue-grid">
+            {filteredDeliveryQueue.map((item) => (
+              <article key={item.id} className="queue-card">
+                <div className="booking-topline">
+                  <div>
+                    <p className="event-name">{item.payloadLabel}</p>
+                    <p className="timeline-meta">
+                      {item.connector} • {item.channel} • {item.target}
+                    </p>
+                  </div>
+                  <span className={`connector-status connector-${item.status}`}>
+                    {item.status}
+                  </span>
+                </div>
+                <p>{item.note}</p>
+                <p className="timeline-meta">Last attempt: {item.lastAttempt}</p>
+                <div className="control-row">
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleDeliveryRetry(item.id)}
+                  >
+                    Retry delivery
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
 

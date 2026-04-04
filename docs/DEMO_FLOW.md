@@ -4,6 +4,14 @@
 
 Walk through the system like an operator showing how the workflow reduces manual work and protects revenue.
 
+## Walkthrough structure (2-3 minutes)
+
+1. Open the simulator and pick the scenario (5-10 seconds).
+2. Show the DM funnel state and rule test (45-60 seconds).
+3. Show the connector relay and webhook inbox (30-45 seconds).
+4. Show recovery + dashboard + audit trail (45-60 seconds).
+5. Close on “what would ship next in week one” (10-15 seconds).
+
 ## Path 1
 
 ### Hot lead to checkout
@@ -28,3 +36,9 @@ Walk through the system like an operator showing how the workflow reduces manual
 1. Open the dashboard section.
 2. Show influenced revenue, show rate, and recovery rate.
 3. End on the server-event naming and audit log to reinforce tracking discipline.
+
+## Operator emphasis
+
+- Show the rule test status to demonstrate automation confidence.
+- Use the connector lab to reinforce Zapier/Make/GHL/Stripe relay points.
+- Use the audit trail to prove observability and naming hygiene.

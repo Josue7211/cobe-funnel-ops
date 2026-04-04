@@ -1,6 +1,6 @@
 # Creator Funnel Ops
 
-`creator-funnel-ops` is a lightweight interview build tailored to the posted `Vibe Coder / Marketing Automation Engineer (AI + No-Code)` role.
+`creator-funnel-ops` is a compact operator console for creator funnel ops: lead capture to checkout, call recovery, and revenue visibility.
 
 Live demo:
 - [GitHub Pages](https://josue7211.github.io/cobe-funnel-ops/)
@@ -24,17 +24,9 @@ The app also includes guided operator scenarios and a live simulator layer so th
 - booked call to no-show recovery
 - payment to onboarding autopilot
 
-## Why this exists
+## Use case
 
-The job post asked for proof of:
-
-- ManyChat-to-Stripe DM funnel thinking
-- call routing and no-show recovery
-- daily revenue dashboards
-- clean tracking and naming standards
-- lightweight internal tools that save time and make money
-
-This repo is a compact vertical slice of that exact workflow.
+For teams running creator funnels, the same problems repeat: high-intent DMs, leaky call attendance, and unclear revenue visibility. This console keeps the operator view in one place: DM intent, recovery state, outbound relay, and tracking audit trails.
 
 ## Stack
 
@@ -64,6 +56,12 @@ npm run build
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - [docs/DEMO_FLOW.md](./docs/DEMO_FLOW.md)
 - [docs/SOP.md](./docs/SOP.md)
+
+## Differentiation
+
+- Purpose-built for creator funnel ops instead of a generic CRM or chatbot clone.
+- Operator-first: workflow steps, audit trails, and relay checkpoints are visible.
+- Built to explain and debug automations, not just run them.
 
 ## Demo framing
 

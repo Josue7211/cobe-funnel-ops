@@ -4,7 +4,7 @@
 
 Use this console to explain a compact creator-funnel workflow from first DM through recovery and reporting.
 
-## Demo flow
+## Operator workflow
 
 1. Open the `DM Sprint Funnel` section.
 2. Show the inbound message asking for price or a call.
@@ -16,9 +16,10 @@ Use this console to explain a compact creator-funnel workflow from first DM thro
 6. Show how a booked lead becomes a no-show and enters recovery.
 7. Move to `Revenue + Tracking Dashboard`.
 8. Show influenced revenue, show rate, recovery rate, and CAPI-ready events.
-9. End on the event log to prove naming discipline and observability.
+9. Open the `Connector Lab` to show where Zapier/Make/GHL/Stripe relay.
+10. End on the `Operator Audit` trail to prove naming discipline and observability.
 
-## Interview framing
+## Demo framing
 
 - Focus on hours saved and dollars influenced.
 - Explain why simulated vendor layers were used:
