@@ -1311,138 +1311,31 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="mission-topbar">
-        <div>
-          <p className="eyebrow">Creator Funnel Ops</p>
-          <h1>Mission Control</h1>
-          <p className="hero-text">
-            Handle active leads, run automations, inspect payloads, and recover revenue from one
-            operator surface.
+    <div className="console-shell">
+      <header className="console-header">
+        <div className="console-brand">
+          <div>
+            <p className="eyebrow">Creator funnel ops</p>
+            <h1>COBE operator console</h1>
+          </div>
+          <p className="console-copy">
+            Work a live DM funnel, push checkout handoff, recover no-shows, and validate revenue
+            events from one SQL-backed surface.
           </p>
         </div>
-        <div className="topbar-metrics">
-          {missionStats.map((stat) => (
-            <article key={stat.label} className="topbar-metric">
+
+        <div className="header-strip">
+          {missionStats.map((stat, index) => (
+            <article key={stat.label} className={`header-cell header-cell-${index + 1}`}>
               <p className="stat-label">{stat.label}</p>
-              <p className="topbar-value">{stat.value}</p>
+              <p className="header-value">{stat.value}</p>
               <p className="stat-note">{stat.note}</p>
             </article>
           ))}
         </div>
-      </header>
 
-      <main className="mission-control">
-        <aside className="panel mission-sidebar">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Queue</p>
-              <h2>Lead inbox</h2>
-            </div>
-            <span className="status-pill">{filteredLeads.length} visible</span>
-          </div>
-          <div className="audit-toolbar">
-            <input
-              className="audit-search"
-              type="search"
-              value={leadQuery}
-              onChange={(event) => setLeadQuery(event.target.value)}
-              placeholder="Search leads, handles, offers, owners, or tags"
-            />
-            <select
-              className="audit-select"
-              value={leadStageFilter}
-              onChange={(event) => setLeadStageFilter(event.target.value as FunnelStage | 'all')}
-            >
-              <option value="all">All stages</option>
-              <option value="new">New</option>
-              <option value="engaged">Engaged</option>
-              <option value="checkout-sent">Checkout sent</option>
-              <option value="booked">Booked</option>
-              <option value="no-show">No-show</option>
-              <option value="recovery">Recovery</option>
-              <option value="won">Won</option>
-            </select>
-          </div>
-          <div className="lead-queue">
-            {prioritizedLeads.map((lead) => {
-              const scenarioForLead = leadScenarios[lead.id]
-              const isActive = lead.id === activeLead.id
-              const priorityLabel =
-                lead.stage === 'no-show'
-                  ? 'SLA red'
-                  : lead.stage === 'checkout-sent'
-                    ? 'SLA amber'
-                    : lead.stage === 'booked'
-                      ? 'SLA watch'
-                      : 'SLA normal'
-
-              return (
-                <button
-                  key={lead.id}
-                  type="button"
-                  className={`lead-queue-item ${isActive ? 'lead-queue-item-active' : ''}`}
-                  onClick={() => {
-                    if (scenarioForLead) {
-                      handleScenarioChange(scenarioForLead)
-                    }
-                  }}
-                >
-                  <div className="lead-queue-topline">
-                    <div>
-                      <p className="mini-label">{lead.source}</p>
-                      <strong>{lead.name}</strong>
-                    </div>
-                    <span className="stage-badge">{priorityLabel}</span>
-                  </div>
-                  <p className="timeline-meta">
-                    {lead.handle} • {lead.offer} • {lead.stage}
-                  </p>
-                  <p className="lead-queue-note">{lead.nextAction}</p>
-                </button>
-              )
-            })}
-          </div>
-        </aside>
-
-        <section className="panel mission-main">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">Active Session</p>
-              <h2>{activeScenario.title}</h2>
-              <p className="stat-note">{activeScenario.outcome}</p>
-            </div>
-            <span className="status-pill">
-              Step {stepIndex + 1}/{runtime.stepLabels.length}
-            </span>
-          </div>
-
-          <div className="mission-summary">
-            <article className="mission-highlight">
-              <p className="mini-label">Current step</p>
-              <h3>{runtime.stepLabels[stepIndex]}</h3>
-              <p>{activeScenario.steps[stepIndex]}</p>
-            </article>
-            <article className="mission-highlight">
-              <p className="mini-label">{runtime.metricLabel}</p>
-              <p className="metric-value">{activeMetricValue}</p>
-              <p className="stat-note">{activeScenario.revenueAngle}</p>
-            </article>
-            <article className="mission-highlight">
-              <p className="mini-label">Operator target</p>
-              <h3>{activeLead.handle}</h3>
-              <p>{activeLead.nextAction}</p>
-            </article>
-          </div>
-
-          <div className="progress-wrap mission-progress">
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${progress}%` }} />
-            </div>
-            <p className="mini-label">Workflow progress</p>
-          </div>
-
-          <div className="command-row">
+        <div className="command-bar">
+          <div className="command-cluster">
             <button
               type="button"
               className="button button-secondary button-small"
@@ -1457,18 +1350,21 @@ function App() {
               onClick={() => handleStepChange(stepIndex + 1)}
               disabled={stepIndex === runtime.stepLabels.length - 1}
             >
-              Advance flow
+              Advance
             </button>
             <button
               type="button"
               className="button button-secondary button-small"
               onClick={() => handleStepChange(0)}
             >
-              Reset flow
+              Reset
             </button>
+          </div>
+
+          <div className="command-cluster">
             <button
               type="button"
-              className="button button-secondary button-small"
+              className="button button-warning button-small"
               onClick={handleRunLiveTest}
             >
               Run live test
@@ -1488,12 +1384,128 @@ function App() {
               Log note
             </button>
           </div>
+        </div>
+      </header>
 
-          <div className="tab-row">
+      <main className="console-grid">
+        <aside className="console-panel queue-panel">
+          <div className="section-topline">
+            <div>
+              <p className="panel-kicker">Lead queue</p>
+              <h2>Prioritized inbox</h2>
+            </div>
+            <span className="status-pill">{filteredLeads.length} visible</span>
+          </div>
+
+          <div className="filters">
+            <input
+              className="audit-search"
+              type="search"
+              value={leadQuery}
+              onChange={(event) => setLeadQuery(event.target.value)}
+              placeholder="Search lead, handle, source, offer"
+            />
+            <select
+              className="audit-select"
+              value={leadStageFilter}
+              onChange={(event) => setLeadStageFilter(event.target.value as FunnelStage | 'all')}
+            >
+              <option value="all">All stages</option>
+              <option value="new">New</option>
+              <option value="engaged">Engaged</option>
+              <option value="checkout-sent">Checkout sent</option>
+              <option value="booked">Booked</option>
+              <option value="no-show">No-show</option>
+              <option value="recovery">Recovery</option>
+              <option value="won">Won</option>
+            </select>
+          </div>
+
+          <div className="lead-queue">
+            {prioritizedLeads.map((lead) => {
+              const scenarioForLead = leadScenarios[lead.id]
+              const isActive = lead.id === activeLead.id
+              const priorityLabel =
+                lead.stage === 'no-show'
+                  ? 'critical'
+                  : lead.stage === 'checkout-sent'
+                    ? 'hot'
+                    : lead.stage === 'booked'
+                      ? 'watch'
+                      : 'normal'
+
+              return (
+                <button
+                  key={lead.id}
+                  type="button"
+                  className={`queue-item ${isActive ? 'queue-item-active' : ''}`}
+                  onClick={() => {
+                    if (scenarioForLead) {
+                      handleScenarioChange(scenarioForLead)
+                    }
+                  }}
+                >
+                  <div className="queue-item-topline">
+                    <div>
+                      <p className="mini-label">{lead.source}</p>
+                      <strong>{lead.name}</strong>
+                    </div>
+                    <span className={`signal-badge signal-${priorityLabel}`}>{priorityLabel}</span>
+                  </div>
+                  <p className="timeline-meta">
+                    {lead.handle} • {lead.offer} • {lead.stage}
+                  </p>
+                  <p className="queue-item-note">{lead.nextAction}</p>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <section className="console-panel workspace-panel">
+          <div className="workspace-header">
+            <div className="workspace-title">
+              <p className="panel-kicker">Active workflow</p>
+              <h2>{activeScenario.title}</h2>
+              <p className="stat-note">{activeScenario.outcome}</p>
+            </div>
+
+            <div className="workspace-status">
+              <div className="status-block status-block-cyan">
+                <p className="mini-label">Current step</p>
+                <strong>{runtime.stepLabels[stepIndex]}</strong>
+                <p>{activeScenario.steps[stepIndex]}</p>
+              </div>
+              <div className="status-block status-block-amber">
+                <p className="mini-label">{runtime.metricLabel}</p>
+                <strong>{activeMetricValue}</strong>
+                <p>{activeScenario.revenueAngle}</p>
+              </div>
+              <div className="status-block status-block-green">
+                <p className="mini-label">Operator target</p>
+                <strong>{activeLead.handle}</strong>
+                <p>{activeLead.nextAction}</p>
+              </div>
+            </div>
+
+            <div className="workflow-track">
+              <div className="workflow-track-topline">
+                <span className="status-pill">
+                  Step {stepIndex + 1}/{runtime.stepLabels.length}
+                </span>
+                <span className="timeline-meta">{activeScenario.hoursSaved} reclaimed</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="workspace-tabs">
             {[
               ['funnel', 'DM workbench'],
-              ['recovery', 'Recovery'],
-              ['payload', 'Payloads'],
+              ['recovery', 'Recovery branch'],
+              ['payload', 'Payload lab'],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -1507,15 +1519,16 @@ function App() {
           </div>
 
           {workbenchTab === 'funnel' ? (
-            <div className="workbench-grid">
-              <article className="inbox-card">
-                <div className="inbox-header">
+            <div className="stage-layout">
+              <section className="stage-panel stage-panel-primary">
+                <div className="section-topline">
                   <div>
-                    <p className="mini-label">Conversation</p>
+                    <p className="mini-label">Live transcript</p>
                     <h3>{activeLead.name}</h3>
                   </div>
                   <div className="score-badge">{activeConversation.score} intent score</div>
                 </div>
+
                 <div className="message-stack">
                   {visibleMessages.map((message) => (
                     <div
@@ -1529,249 +1542,302 @@ function App() {
                     </div>
                   ))}
                 </div>
-                <div className="automation-summary">
+
+                <div className="event-summary">
                   <p className="mini-label">Automation result</p>
                   <p>{activeConversation.automationSummary}</p>
                 </div>
-              </article>
+              </section>
 
-              <article className="lead-card">
-                <div className="lead-header">
-                  <div>
-                    <p className="mini-label">Lead profile</p>
-                    <h3>{activeLead.handle}</h3>
+              <section className="stage-stack">
+                <article className="stage-panel">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Lead profile</p>
+                      <h3>{activeLead.handle}</h3>
+                    </div>
+                    <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
                   </div>
-                  <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
-                </div>
-                <dl className="detail-grid">
-                  <div>
-                    <dt>Offer</dt>
-                    <dd>{activeLead.offer}</dd>
+
+                  <dl className="detail-grid">
+                    <div>
+                      <dt>Offer</dt>
+                      <dd>{activeLead.offer}</dd>
+                    </div>
+                    <div>
+                      <dt>Source</dt>
+                      <dd>{activeLead.source}</dd>
+                    </div>
+                    <div>
+                      <dt>Owner</dt>
+                      <dd>{activeLead.owner}</dd>
+                    </div>
+                    <div>
+                      <dt>Budget</dt>
+                      <dd>{activeLead.budget}</dd>
+                    </div>
+                    <div>
+                      <dt>Last touch</dt>
+                      <dd>{activeLead.lastTouch}</dd>
+                    </div>
+                    <div>
+                      <dt>Hours saved</dt>
+                      <dd>{activeScenario.hoursSaved}</dd>
+                    </div>
+                  </dl>
+
+                  <div className="tag-row">
+                    {activeLead.tags.map((tag) => (
+                      <span key={tag} className="tag">
+                        {tag}
+                      </span>
+                    ))}
                   </div>
-                  <div>
-                    <dt>Source</dt>
-                    <dd>{activeLead.source}</dd>
+                </article>
+
+                <article className="stage-panel stage-panel-actions">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Operator actions</p>
+                      <h3>Flow controls</h3>
+                    </div>
                   </div>
-                  <div>
-                    <dt>Owner</dt>
-                    <dd>{activeLead.owner}</dd>
+                  <div className="action-grid">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleLeadAction('checkout', activeLead.id)}
+                    >
+                      Queue checkout
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleLeadAction('route', activeLead.id)}
+                    >
+                      Route closer
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-danger button-small"
+                      onClick={() => handleLeadAction('no-show', activeLead.id)}
+                    >
+                      Mark no-show
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-warning button-small"
+                      onClick={() => handleLeadAction('recover', activeLead.id)}
+                    >
+                      Recover lead
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={() => handleLeadAction('alert', activeLead.id)}
+                    >
+                      Send alert
+                    </button>
                   </div>
-                  <div>
-                    <dt>Budget</dt>
-                    <dd>{activeLead.budget}</dd>
-                  </div>
-                  <div>
-                    <dt>Last touch</dt>
-                    <dd>{activeLead.lastTouch}</dd>
-                  </div>
-                  <div>
-                    <dt>Hours saved</dt>
-                    <dd>{activeScenario.hoursSaved}</dd>
-                  </div>
-                </dl>
-                <div className="tag-row">
-                  {activeLead.tags.map((tag) => (
-                    <span key={tag} className="tag">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <div className="ops-actions">
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('checkout', activeLead.id)}
-                  >
-                    Queue checkout
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('route', activeLead.id)}
-                  >
-                    Route closer
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('no-show', activeLead.id)}
-                  >
-                    Mark no-show
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => handleLeadAction('recover', activeLead.id)}
-                  >
-                    Recover
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-primary button-small"
-                    onClick={() => handleLeadAction('alert', activeLead.id)}
-                  >
-                    Send alert
-                  </button>
-                </div>
-              </article>
+                </article>
+              </section>
             </div>
           ) : null}
 
           {workbenchTab === 'recovery' ? (
-            <div className="workbench-grid">
-              <article className="booking-card booking-highlight">
-                <div className="booking-topline">
+            <div className="stage-layout">
+              <section className="stage-panel stage-panel-primary">
+                <div className="section-topline">
                   <div>
-                    <p className="mini-label">Call state</p>
+                    <p className="mini-label">Recovery state</p>
                     <h3>{activeLead.name}</h3>
-                    <p>{activeBooking?.slot ?? 'No call slot required'}</p>
+                    <p className="timeline-meta">{activeBooking?.slot ?? 'No call slot required'}</p>
                   </div>
                   <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
                     {runtime.bookingStatuses[stepIndex]}
                   </span>
                 </div>
+
                 <p className="booking-owner">Closer: {activeLead.owner}</p>
-                <p>
+                <p className="booking-copy">
                   {activeBooking?.recoveryAction ??
                     'Payment path skips call handling and moves directly into onboarding automation.'}
                 </p>
+
                 <div className="timeline-stack">
                   {activeLeadTimeline.map((entry) => (
                     <article key={entry.id} className="timeline-card">
-                      <div className="booking-topline">
-                        <p className="event-name">{entry.event}</p>
+                      <div className="section-topline">
+                        <div>
+                          <p className="event-name">{entry.event}</p>
+                          <p className="timeline-meta">
+                            {entry.channel} • {entry.timestamp}
+                          </p>
+                        </div>
                         <span className={`event-status event-${entry.status}`}>{entry.status}</span>
                       </div>
                       <p>{entry.detail}</p>
-                      <p className="timeline-meta">
-                        {entry.channel} • {entry.timestamp}
-                      </p>
                     </article>
                   ))}
                 </div>
-              </article>
+              </section>
 
-              <article className="panel-tight recovery-actions-card">
-                <div className="subsection-header">
-                  <h3>Recovery playbook</h3>
-                  <span className="mini-label">GHL-style branch</span>
-                </div>
-                <ol className="scenario-steps">
-                  {activeScenario.steps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ol>
-                <div className="tag-row">
-                  {scenarioEvents.map((entry) => (
-                    <span key={entry.id} className="tag">
-                      {entry.event}
-                    </span>
-                  ))}
-                </div>
-              </article>
+              <section className="stage-stack">
+                <article className="stage-panel">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Recovery playbook</p>
+                      <h3>Queued actions</h3>
+                    </div>
+                    <span className="signal-badge signal-critical">ghl branch</span>
+                  </div>
+                  <ol className="scenario-steps">
+                    {activeScenario.steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                </article>
+
+                <article className="stage-panel">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Triggered events</p>
+                      <h3>Active automation trail</h3>
+                    </div>
+                  </div>
+                  <div className="tag-row">
+                    {scenarioEvents.map((entry) => (
+                      <span key={entry.id} className="tag">
+                        {entry.event}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              </section>
             </div>
           ) : null}
 
           {workbenchTab === 'payload' ? (
-            <div className="payload-workbench">
-              <div className="payload-controls">
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={() => setWebhookInput(JSON.stringify(activePayload, null, 2))}
-                >
-                  Reset to template
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary button-small"
-                  onClick={handleWebhookValidate}
-                >
-                  Validate payload
-                </button>
-              </div>
-              <textarea
-                className="payload-editor"
-                value={webhookInput}
-                onChange={(event) => setWebhookInput(event.target.value)}
-                spellCheck={false}
-              />
-              {webhookResult ? (
-                <p
-                  className={`webhook-result ${
-                    webhookResult.status === 'accepted' ? 'webhook-accepted' : 'webhook-rejected'
-                  }`}
-                >
-                  {webhookResult.message}
-                </p>
-              ) : null}
-              <div className="webhook-history">
-                <div className="subsection-header">
-                  <h3>Webhook inbox</h3>
-                  <span className="mini-label">{webhookHistory.length} events</span>
+            <div className="stage-layout">
+              <section className="stage-panel stage-panel-primary">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Meta / Stripe payload lab</p>
+                    <h3>Webhook editor</h3>
+                  </div>
+                  <div className="command-cluster">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => setWebhookInput(JSON.stringify(activePayload, null, 2))}
+                    >
+                      Reset template
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={handleWebhookValidate}
+                    >
+                      Validate payload
+                    </button>
+                  </div>
                 </div>
-                {webhookHistory.map((item) => (
-                  <article key={item.id} className="webhook-item">
+
+                <textarea
+                  className="payload-editor"
+                  value={webhookInput}
+                  onChange={(event) => setWebhookInput(event.target.value)}
+                  spellCheck={false}
+                />
+
+                {webhookResult ? (
+                  <p
+                    className={`webhook-result ${
+                      webhookResult.status === 'accepted' ? 'webhook-accepted' : 'webhook-rejected'
+                    }`}
+                  >
+                    {webhookResult.message}
+                  </p>
+                ) : null}
+              </section>
+
+              <section className="stage-stack">
+                <article className="stage-panel">
+                  <div className="section-topline">
                     <div>
-                      <span>{item.label}</span>
-                      <small>{item.id}</small>
+                      <p className="mini-label">Webhook inbox</p>
+                      <h3>Replayable events</h3>
                     </div>
-                    <div className="control-row">
-                      <button
-                        type="button"
-                        className="button button-secondary button-small"
-                        onClick={() => {
-                          setWebhookInput(item.payload)
-                          setWebhookResult({
-                            status: 'accepted',
-                            message: `Loaded ${item.label} from webhook inbox.`,
-                          })
-                        }}
-                      >
-                        Load
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-primary button-small"
-                        onClick={() => handleWebhookReplay(item)}
-                      >
-                        Replay
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
+                    <span className="status-pill">{webhookHistory.length} stored</span>
+                  </div>
+                  <div className="webhook-list">
+                    {webhookHistory.map((item) => (
+                      <article key={item.id} className="webhook-item">
+                        <div>
+                          <p className="event-name">{item.label}</p>
+                          <p className="timeline-meta">{item.id}</p>
+                        </div>
+                        <div className="command-cluster">
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => {
+                              setWebhookInput(item.payload)
+                              setWebhookResult({
+                                status: 'accepted',
+                                message: `Loaded ${item.label} from webhook inbox.`,
+                              })
+                            }}
+                          >
+                            Load
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-warning button-small"
+                            onClick={() => handleWebhookReplay(item)}
+                          >
+                            Replay
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </article>
+              </section>
             </div>
           ) : null}
 
-          <section className="notes-dock">
-            <div className="subsection-header">
-              <h3>Operator notes</h3>
-              <span className="mini-label">Persisted locally</span>
+          <section className="notes-panel">
+            <div className="section-topline">
+              <div>
+                <p className="mini-label">Operator notes</p>
+                <h3>Working memory</h3>
+              </div>
+              <span className="timeline-meta">Persisted locally</span>
             </div>
             <textarea
               className="notes-editor"
               value={operatorNotes}
               onChange={(event) => setOperatorNotes(event.target.value)}
-              placeholder="Capture changes, blockers, or how this flow would map to a live client account."
+              placeholder="Capture blockers, account-specific mapping, or deployment notes."
             />
           </section>
         </section>
 
-        <aside className="panel mission-rail">
-          <div className="panel-header">
+        <aside className="console-panel systems-panel">
+          <div className="section-topline">
             <div>
-              <p className="panel-kicker">Operations Rail</p>
+              <p className="panel-kicker">Systems rail</p>
               <h2>Relays and intelligence</h2>
             </div>
             <span className="status-pill">{railTab}</span>
           </div>
 
-          <div className="tab-row tab-row-compact">
+          <div className="workspace-tabs rail-tabs">
             {[
               ['operations', 'Ops'],
               ['audit', 'Audit'],
-              ['automation', 'Automation'],
+              ['automation', 'Rules'],
               ['metrics', 'Metrics'],
             ].map(([value, label]) => (
               <button
@@ -1787,89 +1853,88 @@ function App() {
 
           {railTab === 'operations' ? (
             <div className="rail-stack">
-              <article className="rail-card rail-card-emphasis">
-                <div className="subsection-header">
-                  <h3>Live test runs</h3>
-                  <span className="mini-label">{liveTestRuns.length} recorded</span>
+              <article className="rail-module rail-module-amber">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Live tests</p>
+                    <h3>Recorded runs</h3>
+                  </div>
+                  <span className="signal-badge signal-hot">{liveTestRuns.length} runs</span>
                 </div>
                 <div className="test-run-stack">
                   {liveTestRuns.slice(0, 3).map((run) => (
-                    <article key={run.id} className="test-run-card">
-                      <div className="booking-topline">
-                        <div>
-                          <p className="event-name">{run.payloadLabel}</p>
-                          <p className="timeline-meta">
-                            {run.scenarioTitle} • {run.stepLabel}
-                          </p>
-                        </div>
-                        <span className={`connector-status connector-${run.status}`}>
-                          {run.status}
-                        </span>
+                    <article key={run.id} className="log-row">
+                      <div>
+                        <p className="event-name">{run.payloadLabel}</p>
+                        <p className="timeline-meta">
+                          {run.scenarioTitle} • {run.stepLabel}
+                        </p>
                       </div>
-                      <p>{run.resultMessage}</p>
-                      <p className="timeline-meta">
-                        {run.connector} • {run.createdAt}
-                      </p>
+                      <div className="log-row-meta">
+                        <span className={`connector-status connector-${run.status}`}>{run.status}</span>
+                        <p className="timeline-meta">{run.connector}</p>
+                      </div>
                     </article>
                   ))}
                   {liveTestRuns.length === 0 ? (
-                    <p className="timeline-meta">No live tests recorded yet. Run one from the mission bar.</p>
+                    <p className="timeline-meta">No live tests recorded yet. Run one from the command bar.</p>
                   ) : null}
                 </div>
               </article>
 
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Delivery outbox</h3>
-                  <span className="mini-label">{activeLeadQueue.length} for active lead</span>
+              <article className="rail-module rail-module-cyan">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Delivery outbox</p>
+                    <h3>Queued relays</h3>
+                  </div>
+                  <span className="timeline-meta">{activeLeadQueue.length} tied to active lead</span>
                 </div>
-                <div className="audit-toolbar">
-                  <select
-                    className="audit-select"
-                    value={deliveryFilter}
-                    onChange={(event) =>
-                      setDeliveryFilter(event.target.value as DeliveryStatus | 'all')
-                    }
-                  >
-                    <option value="all">All statuses</option>
-                    <option value="queued">Queued</option>
-                    <option value="processing">Processing</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="failed">Failed</option>
-                  </select>
-                </div>
+                <select
+                  className="audit-select"
+                  value={deliveryFilter}
+                  onChange={(event) => setDeliveryFilter(event.target.value as DeliveryStatus | 'all')}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="queued">Queued</option>
+                  <option value="processing">Processing</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="failed">Failed</option>
+                </select>
                 <div className="queue-grid">
                   {(activeLeadQueue.length ? activeLeadQueue : prioritizedDeliveryQueue).map((item) => (
                     <article key={item.id} className="queue-card">
-                      <div className="booking-topline">
+                      <div className="section-topline">
                         <div>
                           <p className="event-name">{item.payloadLabel}</p>
                           <p className="timeline-meta">
-                            {item.connector} • {item.channel} • {item.target}
+                            {item.connector} • {item.channel}
                           </p>
                         </div>
-                        <span className={`connector-status connector-${item.status}`}>
-                          {item.status}
-                        </span>
+                        <span className={`connector-status connector-${item.status}`}>{item.status}</span>
                       </div>
                       <p>{item.note}</p>
-                      <p className="timeline-meta">Last attempt: {item.lastAttempt}</p>
-                      <button
-                        type="button"
-                        className="button button-secondary button-small"
-                        onClick={() => handleDeliveryRetry(item.id)}
-                      >
-                        Retry delivery
-                      </button>
+                      <div className="queue-card-footer">
+                        <p className="timeline-meta">{item.target}</p>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => handleDeliveryRetry(item.id)}
+                        >
+                          Retry
+                        </button>
+                      </div>
                     </article>
                   ))}
                 </div>
               </article>
 
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Connector health</h3>
-                  <span className="mini-label">Zapier, Make, GHL, Meta</span>
+              <article className="rail-module rail-module-green">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Connector health</p>
+                    <h3>Live integrations</h3>
+                  </div>
                 </div>
                 <div className="connector-grid">
                   {automationConnectors.map((connector) => {
@@ -1878,7 +1943,7 @@ function App() {
 
                     return (
                       <article key={connector.name} className="connector-card">
-                        <div className="connector-topline">
+                        <div className="section-topline">
                           <div>
                             <p className="mini-label">{connector.category}</p>
                             <h3>{connector.name}</h3>
@@ -1888,16 +1953,18 @@ function App() {
                           </span>
                         </div>
                         <p>{connector.use}</p>
-                        <p className="timeline-meta">
-                          Last ping: {state?.lastPing ?? 'just now'} • Runs: {state?.runs ?? 0}
-                        </p>
-                        <button
-                          type="button"
-                          className="button button-secondary button-small"
-                          onClick={() => handleConnectorPing(connector.name)}
-                        >
-                          Ping
-                        </button>
+                        <div className="queue-card-footer">
+                          <p className="timeline-meta">
+                            {state?.lastPing ?? 'just now'} • {state?.runs ?? 0} runs
+                          </p>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => handleConnectorPing(connector.name)}
+                          >
+                            Ping
+                          </button>
+                        </div>
                       </article>
                     )
                   })}
@@ -1908,7 +1975,7 @@ function App() {
 
           {railTab === 'audit' ? (
             <div className="rail-stack">
-              <div className="audit-toolbar">
+              <div className="filters">
                 <input
                   className="audit-search"
                   type="search"
@@ -1929,24 +1996,25 @@ function App() {
                   <option value="note">Note</option>
                 </select>
               </div>
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Active lead trail</h3>
-                  <span className="mini-label">{activeLeadAudit.length} matched</span>
+
+              <article className="rail-module rail-module-magenta">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Audit feed</p>
+                    <h3>Active lead trail</h3>
+                  </div>
+                  <span className="timeline-meta">{activeLeadAudit.length} matched</span>
                 </div>
                 <div className="audit-list">
                   {(activeLeadAudit.length ? activeLeadAudit : visibleAuditEvents).map((entry) => (
-                    <article key={entry.id} className="audit-card">
-                      <div className="booking-topline">
-                        <div>
-                          <p className="event-name">{entry.title}</p>
-                          <p className="timeline-meta">
-                            {entry.target} • {entry.timestamp}
-                          </p>
-                        </div>
-                        <span className={`event-status audit-${entry.kind}`}>{entry.kind}</span>
+                    <article key={entry.id} className="log-row">
+                      <div>
+                        <p className="event-name">{entry.title}</p>
+                        <p className="timeline-meta">
+                          {entry.target} • {entry.timestamp}
+                        </p>
                       </div>
-                      <p>{entry.detail}</p>
+                      <span className={`event-status audit-${entry.kind}`}>{entry.kind}</span>
                     </article>
                   ))}
                 </div>
@@ -1956,10 +2024,13 @@ function App() {
 
           {railTab === 'automation' ? (
             <div className="rail-stack">
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Rule lab</h3>
-                  <span className="mini-label">{ruleDrafts.length} active rules</span>
+              <article className="rail-module rail-module-magenta">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Rule lab</p>
+                    <h3>Automation coverage</h3>
+                  </div>
+                  <span className="signal-badge signal-watch">{ruleDrafts.length} active</span>
                 </div>
                 <div className="rule-stack">
                   {ruleDrafts.map((rule) => {
@@ -1967,11 +2038,8 @@ function App() {
                     const result = ruleTestResults[rule.id]
 
                     return (
-                      <article
-                        key={rule.id}
-                        className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}
-                      >
-                        <div className="rule-header">
+                      <article key={rule.id} className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}>
+                        <div className="section-topline">
                           <div>
                             <p className="mini-label">{sourceRule?.system}</p>
                             <h3>{rule.trigger}</h3>
@@ -2001,10 +2069,12 @@ function App() {
                 </div>
               </article>
 
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Coverage map</h3>
-                  <span className="mini-label">Job-post aligned</span>
+              <article className="rail-module rail-module-green">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Job fit</p>
+                    <h3>Requirement coverage</h3>
+                  </div>
                 </div>
                 <div className="fit-stack">
                   {integrationFit.map((item) => (
@@ -2020,10 +2090,12 @@ function App() {
 
           {railTab === 'metrics' ? (
             <div className="rail-stack">
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Revenue dashboard</h3>
-                  <span className="mini-label">Stripe + Meta-ready</span>
+              <article className="rail-module rail-module-amber">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Revenue dashboard</p>
+                    <h3>Live funnel metrics</h3>
+                  </div>
                 </div>
                 <div className="metric-grid">
                   {railMetrics.map((metric) => (
@@ -2036,10 +2108,13 @@ function App() {
                 </div>
               </article>
 
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Meta CAPI payloads</h3>
-                  <span className="mini-label">{capiEvents.length} events</span>
+              <article className="rail-module rail-module-magenta">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Meta CAPI</p>
+                    <h3>Server event payloads</h3>
+                  </div>
+                  <span className="timeline-meta">{capiEvents.length} events</span>
                 </div>
                 <div className="capi-table">
                   {capiEvents.map((event) => (
@@ -2061,9 +2136,12 @@ function App() {
                 </div>
               </article>
 
-              <article className="rail-card">
-                <div className="subsection-header">
-                  <h3>Shipped modules</h3>
+              <article className="rail-module rail-module-cyan">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Shipped modules</p>
+                    <h3>Operator surface</h3>
+                  </div>
                 </div>
                 <div className="fit-stack">
                   {repoModules.map((module) => (
