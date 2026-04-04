@@ -1,3 +1,4 @@
+import { startTransition, useMemo, useState } from 'react'
 import './App.css'
 import {
   automationRules,
@@ -6,6 +7,7 @@ import {
   conversations,
   demoScenarios,
   eventLog,
+  integrationFit,
   leads,
   repoModules,
   revenueMetrics,
@@ -13,38 +15,50 @@ import {
 } from './data'
 
 function App() {
-  const activeConversation = conversations[0]
+  const [scenarioId, setScenarioId] = useState(demoScenarios[0].id)
+  const [showExpandedTimeline, setShowExpandedTimeline] = useState(false)
+
+  const activeScenario = useMemo(
+    () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
+    [scenarioId],
+  )
+  const activeLead = leads.find((lead) => lead.id === activeScenario.leadId) ?? leads[0]
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === activeScenario.conversationId) ??
+    conversations[0]
+  const activeBooking = bookings.find((booking) => booking.id === activeScenario.bookingId)
+  const scenarioEvents = eventLog.filter((entry) => activeScenario.eventIds.includes(entry.id))
 
   return (
     <div className="app-shell">
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Interview Build • Creator Funnel Ops</p>
-          <h1>DM automation, no-show recovery, and revenue tracking in one operator console.</h1>
+          <p className="eyebrow">Creator Funnel Ops</p>
+          <h1>One operator console for DM automation, recovery logic, and revenue visibility.</h1>
           <p className="hero-text">
-            This demo is scoped around the job post itself: a ManyChat-style DM sprint funnel,
-            GHL-style routing and recovery, and a dashboard that keeps Stripe and CAPI-ready
-            events visible.
+            This project is built around the workflow from the job post itself: a ManyChat-style
+            DM sprint funnel, GHL-style no-show recovery, and a Stripe plus Meta-ready reporting
+            layer.
           </p>
           <div className="hero-actions">
-            <a href="#dm-funnel" className="button button-primary">
-              Walk the DM funnel
+            <a href="#scenarios" className="button button-primary">
+              Drive the scenarios
             </a>
             <a href="#dashboard" className="button button-secondary">
-              See revenue + ops
+              Inspect reporting
             </a>
           </div>
         </div>
         <div className="hero-card">
           <div className="hero-card-header">
             <span>Outcome Fit</span>
-            <span>Week-one ready</span>
+            <span>Operator-first</span>
           </div>
           <ul className="check-list">
-            <li>ManyChat-style DM qualification and tagging</li>
-            <li>Stripe checkout handoff and webhook outcomes</li>
-            <li>Call routing, no-show state, and recovery branch</li>
-            <li>Meta CAPI-ready event naming and payload mapping</li>
+            <li>DM lead qualification and tagging</li>
+            <li>Stripe checkout and payment-state handling</li>
+            <li>Call routing and no-show recovery</li>
+            <li>Onboarding autopilot and CAPI-ready event naming</li>
           </ul>
         </div>
       </header>
@@ -68,15 +82,29 @@ function App() {
         ))}
       </section>
 
-      <section className="scenario-strip">
+      <section id="scenarios" className="scenario-strip">
         {demoScenarios.map((scenario) => (
-          <article key={scenario.id} className="scenario-card">
+          <article
+            key={scenario.id}
+            className={`scenario-card ${scenario.id === activeScenario.id ? 'scenario-card-active' : ''}`}
+          >
             <div className="scenario-header">
               <div>
                 <p className="module-name">Demo path</p>
                 <h2>{scenario.title}</h2>
               </div>
-              <span className="status-pill">Loom-ready</span>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() =>
+                  startTransition(() => {
+                    setScenarioId(scenario.id)
+                    setShowExpandedTimeline(false)
+                  })
+                }
+              >
+                {scenario.id === activeScenario.id ? 'Selected' : 'Open path'}
+              </button>
             </div>
             <p className="scenario-outcome">{scenario.outcome}</p>
             <ol className="scenario-steps">
@@ -84,6 +112,16 @@ function App() {
                 <li key={step}>{step}</li>
               ))}
             </ol>
+            <div className="scenario-impact">
+              <div>
+                <p className="mini-label">Hours saved</p>
+                <p>{scenario.hoursSaved}</p>
+              </div>
+              <div>
+                <p className="mini-label">Revenue angle</p>
+                <p>{scenario.revenueAngle}</p>
+              </div>
+            </div>
           </article>
         ))}
       </section>
@@ -101,8 +139,8 @@ function App() {
             <article className="inbox-card">
               <div className="inbox-header">
                 <div>
-                  <p className="mini-label">Active conversation</p>
-                  <h3>{leads[0].name}</h3>
+                  <p className="mini-label">Selected conversation</p>
+                  <h3>{activeLead.name}</h3>
                 </div>
                 <div className="score-badge">{activeConversation.score} intent score</div>
               </div>
@@ -129,30 +167,38 @@ function App() {
               <div className="lead-header">
                 <div>
                   <p className="mini-label">Lead profile</p>
-                  <h3>{leads[0].handle}</h3>
+                  <h3>{activeLead.handle}</h3>
                 </div>
-                <span className="stage-badge">{leads[0].stage}</span>
+                <span className="stage-badge">{activeLead.stage}</span>
               </div>
               <dl className="detail-grid">
                 <div>
                   <dt>Offer</dt>
-                  <dd>{leads[0].offer}</dd>
+                  <dd>{activeLead.offer}</dd>
                 </div>
                 <div>
                   <dt>Source</dt>
-                  <dd>{leads[0].source}</dd>
+                  <dd>{activeLead.source}</dd>
                 </div>
                 <div>
                   <dt>Owner</dt>
-                  <dd>{leads[0].owner}</dd>
+                  <dd>{activeLead.owner}</dd>
                 </div>
                 <div>
                   <dt>Next action</dt>
-                  <dd>{leads[0].nextAction}</dd>
+                  <dd>{activeLead.nextAction}</dd>
+                </div>
+                <div>
+                  <dt>Budget</dt>
+                  <dd>{activeLead.budget}</dd>
+                </div>
+                <div>
+                  <dt>Last touch</dt>
+                  <dd>{activeLead.lastTouch}</dd>
                 </div>
               </dl>
               <div className="tag-row">
-                {leads[0].tags.map((tag) => (
+                {activeLead.tags.map((tag) => (
                   <span key={tag} className="tag">
                     {tag}
                   </span>
@@ -195,6 +241,36 @@ function App() {
             <span className="status-pill">GHL mirror</span>
           </div>
           <div className="booking-stack">
+            {activeBooking ? (
+              <article className="booking-card booking-highlight">
+                <div className="booking-topline">
+                  <div>
+                    <p className="mini-label">Selected scenario state</p>
+                    <h3>{activeLead.name}</h3>
+                    <p>{activeBooking.slot}</p>
+                  </div>
+                  <span className={`booking-status booking-${activeBooking.status}`}>
+                    {activeBooking.status}
+                  </span>
+                </div>
+                <p className="booking-owner">Closer: {activeBooking.owner}</p>
+                <p>{activeBooking.recoveryAction}</p>
+              </article>
+            ) : (
+              <article className="booking-card booking-highlight">
+                <div className="booking-topline">
+                  <div>
+                    <p className="mini-label">Selected scenario state</p>
+                    <h3>{activeLead.name}</h3>
+                    <p>No call state required for this flow.</p>
+                  </div>
+                  <span className="booking-status booking-recovered">onboarding</span>
+                </div>
+                <p className="booking-owner">Owner: {activeLead.owner}</p>
+                <p>Payment moves directly into onboarding autopilot and reporting.</p>
+              </article>
+            )}
+
             {bookings.map((booking) => {
               const lead = leads.find((entry) => entry.id === booking.leadId)
               return (
@@ -260,6 +336,54 @@ function App() {
                 ))}
               </div>
             </article>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Coverage</p>
+              <h2>Stack Fit</h2>
+            </div>
+            <span className="status-pill">Job-post aligned</span>
+          </div>
+          <div className="fit-stack">
+            {integrationFit.map((item) => (
+              <article key={item.name} className="fit-card">
+                <h3>{item.name}</h3>
+                <p>{item.fit}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-kicker">Scenario Trail</p>
+              <h2>Operator Timeline</h2>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => setShowExpandedTimeline((current) => !current)}
+            >
+              {showExpandedTimeline ? 'Show scenario only' : 'Show full event trail'}
+            </button>
+          </div>
+          <div className="timeline-stack">
+            {(showExpandedTimeline ? eventLog : scenarioEvents).map((entry) => (
+              <article key={entry.id} className="timeline-card">
+                <div className="booking-topline">
+                  <p className="event-name">{entry.event}</p>
+                  <span className={`event-status event-${entry.status}`}>{entry.status}</span>
+                </div>
+                <p>{entry.detail}</p>
+                <p className="timeline-meta">
+                  {entry.channel} • {entry.timestamp}
+                </p>
+              </article>
+            ))}
           </div>
         </section>
 

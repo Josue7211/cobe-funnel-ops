@@ -85,5 +85,11 @@ export interface DemoScenario {
   id: string
   title: string
   outcome: string
+  leadId: string
+  conversationId?: string
+  bookingId?: string
+  eventIds: string[]
+  hoursSaved: string
+  revenueAngle: string
   steps: string[]
 }

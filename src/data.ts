@@ -125,6 +125,28 @@ export const conversations: Conversation[] = [
       },
     ],
   },
+  {
+    id: 'conv-003',
+    leadId: 'lead-003',
+    intent: 'proof',
+    score: 81,
+    automationSummary:
+      'Payment webhook promoted the lead to subscriber, triggered onboarding autopilot, and logged a CAPI-ready purchase event.',
+    messages: [
+      {
+        id: 'm9',
+        sender: 'lead',
+        text: 'paid. what happens next?',
+        timestamp: '08:05',
+      },
+      {
+        id: 'm10',
+        sender: 'bot',
+        text: 'You are in. I created your onboarding checklist, folder links, and kickoff instructions. If you want the community link next, I can drop that too.',
+        timestamp: '08:06',
+      },
+    ],
+  },
 ]
 
 export const automationRules: AutomationRule[] = [
@@ -245,6 +267,24 @@ export const eventLog: EventLogItem[] = [
     detail: 'Subscription payment succeeded; onboarding triggered.',
     timestamp: '08:06:44',
   },
+  {
+    id: 'evt-007',
+    event: 'onboarding.autopilot_started',
+    leadId: 'lead-003',
+    channel: 'ops_automation',
+    status: 'processed',
+    detail: 'Provisioned SOP links, folder template, and welcome actions.',
+    timestamp: '08:06:48',
+  },
+  {
+    id: 'evt-008',
+    event: 'capi.purchase_ready',
+    leadId: 'lead-003',
+    channel: 'meta_server_events',
+    status: 'processed',
+    detail: 'Purchase payload normalized for future Meta CAPI relay.',
+    timestamp: '08:06:49',
+  },
 ]
 
 export const revenueMetrics: RevenueMetric[] = [
@@ -295,6 +335,12 @@ export const demoScenarios: DemoScenario[] = [
     id: 'scenario-001',
     title: 'Hot DM to Stripe checkout',
     outcome: 'Turns a pricing DM into a tagged lead, checkout handoff, and revenue-visible event trail.',
+    leadId: 'lead-001',
+    conversationId: 'conv-001',
+    bookingId: 'book-002',
+    eventIds: ['evt-001', 'evt-002', 'evt-003'],
+    hoursSaved: '2 to 3 hours per day from manual DM replies and tag cleanup.',
+    revenueAngle: 'Cuts the time between intent and checkout for low-ticket offers.',
     steps: [
       'Lead asks for price in DM.',
       'Intent rules classify checkout intent and apply dm-sprint tags.',
@@ -306,6 +352,12 @@ export const demoScenarios: DemoScenario[] = [
     id: 'scenario-002',
     title: 'Booked call to no-show recovery',
     outcome: 'Protects high-ticket consult revenue by tagging no-shows and queuing the recovery branch automatically.',
+    leadId: 'lead-002',
+    conversationId: 'conv-002',
+    bookingId: 'book-001',
+    eventIds: ['evt-004', 'evt-005'],
+    hoursSaved: '1 to 2 hours per closer from manual follow-up and reschedule chasing.',
+    revenueAngle: 'Closes revenue leakage on missed consults before the lead goes cold.',
     steps: [
       'Lead requests a consult call and gets routed to the right closer.',
       'Reminder sequence starts before the call.',
@@ -313,4 +365,30 @@ export const demoScenarios: DemoScenario[] = [
       'Recovery message, reschedule link, and proof stack are queued without manual ops work.',
     ],
   },
+  {
+    id: 'scenario-003',
+    title: 'Payment to onboarding autopilot',
+    outcome:
+      'Turns a successful payment into onboarding actions, clean handoff, and immediate operator visibility.',
+    leadId: 'lead-003',
+    conversationId: 'conv-003',
+    eventIds: ['evt-006', 'evt-007', 'evt-008'],
+    hoursSaved: '30 to 45 minutes per new client from repetitive provisioning work.',
+    revenueAngle: 'Improves post-purchase experience while keeping ops overhead low.',
+    steps: [
+      'Stripe webhook marks the lead as won.',
+      'Subscription state updates in the dashboard.',
+      'Onboarding autopilot provisions the next-step assets and SOP links.',
+      'Purchase event is normalized for reporting and future Meta server events.',
+    ],
+  },
+]
+
+export const integrationFit = [
+  { name: 'Claude Code', fit: 'Used to scaffold and iterate on the operator console quickly.' },
+  { name: 'Zapier / Make', fit: 'Represented as automation layers behind tags, routing, and webhook actions.' },
+  { name: 'GHL', fit: 'Mirrored through booking state, owner routing, and no-show recovery.' },
+  { name: 'Stripe', fit: 'Represented through checkout handoff, webhook outcomes, and revenue updates.' },
+  { name: 'Meta CAPI', fit: 'Modeled with server-event naming, match keys, and payload readiness.' },
+  { name: 'Client onboarding', fit: 'Covered through the payment-to-onboarding autopilot scenario.' },
 ]
