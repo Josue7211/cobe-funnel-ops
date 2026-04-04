@@ -40,7 +40,7 @@
 .mission-control {
   display: grid;
   gap: 1rem;
-  grid-template-columns: 320px minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1.45fr) minmax(320px, 420px);
   align-items: start;
 }
 
@@ -162,8 +162,42 @@
 .workbench-grid {
   display: grid;
   gap: 0.8rem;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   margin-top: 1rem;
+}
+
+.mission-main,
+.mission-rail {
+  min-width: 0;
+}
+
+.mission-topbar {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+}
+
+.topbar-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.topbar-metric {
+  min-height: 100%;
+}
+
+.mission-sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 251, 244, 0.96), rgba(248, 240, 228, 0.94));
+}
+
+.mission-main {
+  background:
+    radial-gradient(circle at top right, rgba(255, 143, 77, 0.06), transparent 28%),
+    var(--surface);
+}
+
+.mission-rail {
+  background:
+    radial-gradient(circle at top left, rgba(41, 111, 255, 0.07), transparent 25%),
+    var(--surface);
 }
 
 .payload-workbench,
