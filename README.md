@@ -2,6 +2,10 @@
 
 `creator-funnel-ops` is a lightweight interview build tailored to the posted `Vibe Coder / Marketing Automation Engineer (AI + No-Code)` role.
 
+Live demo:
+- [GitHub Pages](https://josue7211.github.io/cobe-funnel-ops/)
+- [GitHub repo](https://github.com/Josue7211/cobe-funnel-ops)
+
 It demonstrates three connected modules in one operator-facing app:
 
 - `DM Sprint Funnel` — a ManyChat-style inbox simulator for lead intake, intent routing, tagging, and checkout handoff
