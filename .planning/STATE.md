@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: COBE First 90 Days
-status: archived
-stopped_at: Milestone archived
-last_updated: "2026-04-05T22:45:00.000Z"
+milestone: v2.0
+milestone_name: Interview Operating System
+status: defining requirements
+stopped_at: Defining v2.0 requirements
+last_updated: "2026-04-05T23:10:00.000Z"
 last_activity: 2026-04-05
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-05)
 
 **Core value:** An operator can move a lead from DM to payment, recovery, and onboarding from one trustworthy console without losing state or visibility.
-**Current focus:** Next milestone discovery
+**Current focus:** Defining v2.0 requirements
 
 ## Current Position
 
-Phase: v1.0 milestone — COMPLETE
-Plan: 20 of 20
-Status: Milestone archived
-Last activity: 2026-04-05
+Phase: Not started
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-05 — Milestone v2.0 started
 
-Progress: [██████████] 100%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Recent decisions affecting current work:
 - [Phase 05-internal-tool-factory-and-ops-hardening]: Ship a reusable proof-pack generator and failure inbox inside the systems rail.
 - [Phase 05-internal-tool-factory-and-ops-hardening]: Expose failed delivery counts in the report snapshot so the internal tool can surface real retries.
 - [Milestone v1.0]: Reframe the product around the COBE first-90-days job post and ship a real interview-grade operator system.
+- [Milestone v2.0]: Shift the next milestone toward interview proof, guided narrative, and credibility layers.
 
 ### Pending Todos
 
@@ -96,5 +97,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-05T21:10:25.716Z
-Stopped at: Milestone archived
+Stopped at: Defining v2.0 requirements
 Resume file: None
