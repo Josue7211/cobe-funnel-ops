@@ -11,6 +11,16 @@ export type EventStatus = 'sent' | 'processed' | 'warning'
 
 export type Intent = 'pricing' | 'call' | 'checkout' | 'proof' | 'objection'
 
+export type ConsultBookingStatus =
+  | 'booked'
+  | 'reminded'
+  | 'no-show'
+  | 'recovered'
+  | 'rescheduled'
+  | 'lost'
+
+export type ConsultRoutingLane = 'qualification' | 'consult' | 'recovery' | 'checkout' | 'onboarding'
+
 export interface Message {
   id: string
   sender: 'lead' | 'bot'
@@ -64,14 +74,49 @@ export interface Booking {
   leadId: string
   slot: string
   owner: string
-  status: 'booked' | 'reminded' | 'no-show' | 'recovered' | 'lost'
+  status: ConsultBookingStatus
   recoveryAction: string
+  routingLane?: ConsultRoutingLane
+  leadStage?: FunnelStage
+}
+
+export interface OnboardingRun {
+  id: string
+  leadId: string
+  status: string
+  folderUrl: string
+  sopUrl: string
+  inviteUrl: string
+  handoffState?: OnboardingHandoffState
+}
+
+export interface OnboardingHandoffDestination {
+  name: string
+  status: string
+  url: string
+  note: string
+}
+
+export interface OnboardingHandoffState {
+  status: string
+  folderUrl: string
+  sopUrl: string
+  inviteUrl: string
+  destinations: OnboardingHandoffDestination[]
 }
 
 export interface RevenueMetric {
   label: string
   value: string
   delta: string
+}
+
+export interface OperatorToolTemplate {
+  id: string
+  title: string
+  summary: string
+  outcome: string
+  steps: string[]
 }
 
 export interface CapiEvent {

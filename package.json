@@ -4,18 +4,22 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "node server/index.js",
+    "dev": "concurrently \"ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local server/index.js\" \"vite\"",
+    "dev:api": "ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local server/index.js",
     "dev:web": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "reset:data": "node -e \"import('./server/store.js').then((m)=>m.resetState())\""
+    "start": "ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local server/index.js",
+    "reset:data": "ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local -e \"import('./server/store.js').then((m)=>m.resetState())\"",
+    "test:backend": "ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local server/smoke.mjs",
+    "test:http": "ADMIN_USERNAME=operator ADMIN_PASSWORD=operator ADMIN_SESSION_SECRET=local-dev-session-secret-override ADMIN_SESSION_COOKIE_SECURE=false node --env-file=.env.local server/http-smoke.mjs"
   },
   "dependencies": {
     "concurrently": "^9.2.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "geist": "^1.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

@@ -30,3 +30,4 @@ docs/WEEK_ONE_FOR_COBE.md
 .vercel
 server/data/
 server/data/runtime.json
+.gstack/

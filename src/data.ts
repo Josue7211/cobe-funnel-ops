@@ -6,6 +6,7 @@ import type {
   DemoScenario,
   EventLogItem,
   Lead,
+  OperatorToolTemplate,
   RevenueMetric,
 } from './types'
 
@@ -393,6 +394,42 @@ export const integrationFit = [
   { name: 'Client onboarding', fit: 'Covered through the payment-to-onboarding autopilot scenario.' },
 ]
 
+export const operatorToolTemplates: OperatorToolTemplate[] = [
+  {
+    id: 'proof-pack',
+    title: 'Proof pack generator',
+    summary: 'Build a copy-ready operator summary from the live queue, revenue, and connector state.',
+    outcome: 'Creates a short update you can send or read aloud in the interview.',
+    steps: [
+      'Open the current lead and live revenue snapshot.',
+      'Collect the active funnel, recovery, and onboarding numbers.',
+      'Export the short proof pack with a single click.',
+    ],
+  },
+  {
+    id: 'sop-handoff',
+    title: 'SOP handoff helper',
+    summary: 'Bundle the runbook steps, owner notes, and retry instructions for the current state.',
+    outcome: 'Makes repeatable operator work easier to hand off or reuse.',
+    steps: [
+      'Review the current lead and delivery backlog.',
+      'Pull the standard operating steps for the active scenario.',
+      'Share the checklist with the next operator or closer.',
+    ],
+  },
+  {
+    id: 'triage-note',
+    title: 'Failure triage note',
+    summary: 'Summarize failed deliveries and attention-needed connectors into one actionable note.',
+    outcome: 'Turns retry work into a compact backlog item instead of a hidden exception.',
+    steps: [
+      'Find failed or stuck deliveries in the live outbox.',
+      'Summarize the blocker and the next retry step.',
+      'Queue or ping the connector that needs attention.',
+    ],
+  },
+]
+
 export const automationConnectors = [
   {
     name: 'Zapier',
@@ -428,5 +465,30 @@ export const automationConnectors = [
     name: 'Google Sheets',
     category: 'Reporting',
     use: 'Log daily metrics and keep a low-friction source of truth for the team.',
+  },
+  {
+    name: 'Typeform',
+    category: 'Lead capture',
+    use: 'Qualifying Typeform and JotForm responses funnel into the DM sprint rules.',
+  },
+  {
+    name: 'Kajabi',
+    category: 'Membership ops',
+    use: 'Marks Kajabi membership access and course provisioning after payment + onboarding.',
+  },
+  {
+    name: 'Skool',
+    category: 'Community',
+    use: 'Skool invites and workspace updates flow from the onboarding autopilot.',
+  },
+  {
+    name: 'Discord',
+    category: 'Community alerts',
+    use: 'Discord escalations fire on hot leads, recovery paths, and automation exceptions.',
+  },
+  {
+    name: 'Apify',
+    category: 'Web scraping',
+    use: 'Apify-style scrapers refresh social signals that feed Claude Code automation tests.',
   },
 ]

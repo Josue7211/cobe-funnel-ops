@@ -1,0 +1,17 @@
+services:
+  app:
+    image: cobe-funnel-ops:latest
+    container_name: cobe-funnel-ops
+    restart: unless-stopped
+    ports:
+      - "18790:8787"
+    environment:
+      PORT: "8787"
+      ADMIN_USERNAME: "operator"
+      ADMIN_PASSWORD: "operator"
+      ADMIN_SESSION_SECRET: "cobe-services-vm-session-secret"
+      ADMIN_SESSION_COOKIE_SECURE: "true"
+      SUPABASE_URL: "${SUPABASE_URL}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY}"
+    volumes:
+      - /home/aparcedodev/apps/cobe-funnel-ops-data:/app/server/data

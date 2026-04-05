@@ -1,27 +1,61 @@
-import { startTransition, useEffect, useMemo, useState } from 'react'
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import './App.css'
 import {
+  ApiError,
+  createOauthSession,
+  fetchSheetsExportPreview,
+  fetchSlackExportPreview,
+  fetchOauthAuthorizeUrl,
+  fetchAdminSession,
   fetchBootstrap,
+  fetchLeadTimeline,
+  fetchQueue,
+  fetchReportsOverview,
+  fetchSyncDiff,
+  fetchSyncStatus,
+  loginAdmin,
   logNote as logNoteRequest,
+  logoutAdmin,
   pingConnector as pingConnectorRequest,
+  resetRuntimeState,
+  pullSync,
   retryDelivery as retryDeliveryRequest,
+  pushSync,
+  sendSheetsExport,
+  sendSlackExport,
+  runBookingUpdate as runBookingUpdateRequest,
+  runDmIntake as runDmIntakeRequest,
   runLeadAction,
   runLiveTest as runLiveTestRequest,
+  runOnboardingProvision as runOnboardingProvisionRequest,
+  runStripePayment as runStripePaymentRequest,
+  reconcileSync,
   validateWebhook as validateWebhookRequest,
 } from './api'
 import {
   automationRules,
   automationConnectors,
-  bookings,
   capiEvents,
-  conversations,
   demoScenarios,
-  eventLog,
-  integrationFit,
-  leads,
+  operatorToolTemplates,
   repoModules,
 } from './data'
-import type { Booking, FunnelStage, Lead } from './types'
+import type {
+  Booking,
+  Conversation,
+  FunnelStage,
+  Lead,
+  OnboardingRun,
+  OperatorToolTemplate,
+} from './types'
 
 type ScenarioRuntime = {
   stepLabels: string[]
@@ -112,18 +146,86 @@ type DeliveryItem = {
   note: string
 }
 
+type QueueLead = {
+  id: string
+  handle: string
+  name: string
+  owner: string
+  stage: FunnelStage
+  lane: string
+  priorityScore: number
+  priorityBand: string
+  nextAction: string
+  conversationScore: number
+  bookingStatus: string | null
+  latestDeliveryStatus: string | null
+  recommendedAction: string
+  tags: string[]
+  source: string
+  offer: string
+}
+
+type LeadTimelineEntry = {
+  id: string
+  type: string
+  timestamp: string
+  title: string
+  detail: string
+}
+
+type ReportsOverview = {
+  queueSummary: {
+    total: number
+    critical: number
+    hot: number
+    recovery: number
+  }
+  outboxSummary: {
+    total: number
+    queued: number
+    processing: number
+    delivered: number
+    failed: number
+  }
+  laneBreakdown: Record<string, number>
+  sourceBreakdown: Record<string, number>
+  connectors: Array<{
+    name: string
+    status: string
+    runs: number
+    lastPing: string
+    queued: number
+    processing: number
+    delivered: number
+    note: string
+  }>
+  onboarding: {
+    total: number
+    completed: number
+  }
+}
+
 type WorkbenchTab = 'funnel' | 'recovery' | 'payload'
 
-type RailTab = 'operations' | 'audit' | 'automation' | 'metrics'
+type RailTab = 'operations' | 'audit' | 'automation' | 'metrics' | 'tools'
+type AuthStatus = 'checking' | 'authenticated' | 'auth_required'
+type RuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded'
 
-const leadStagePriority: Record<FunnelStage, number> = {
-  'no-show': 0,
-  'checkout-sent': 1,
-  booked: 2,
-  engaged: 3,
-  recovery: 4,
-  new: 5,
-  won: 6,
+const OAUTH_SESSION_EVENT = 'cobe-oauth-complete'
+const AUTO_DEMO_USERNAME = 'operator'
+const AUTO_DEMO_PASSWORD = 'operator'
+
+function isLocalDemoHost() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  if (import.meta.env.DEV) {
+    return true
+  }
+
+  const hostname = window.location.hostname.toLowerCase()
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
 }
 
 const deliveryStatusPriority: Record<DeliveryStatus, number> = {
@@ -154,78 +256,51 @@ function formatCurrency(value: number) {
   }).format(Number.isFinite(value) ? value : 0)
 }
 
-const defaultConnectorStates = automationConnectors.reduce<Record<string, ConnectorState>>(
-  (accumulator, connector) => {
-    accumulator[connector.name] = {
-      status: 'ready',
-      lastPing: 'just now',
-      runs: 0,
-      note: `${connector.name} is staged for the next relay.`,
-    }
-    return accumulator
-  },
-  {},
-)
+function ProviderIcon({ provider }: { provider: 'google' | 'github' }) {
+  if (provider === 'google') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
+        <path
+          fill="#4285F4"
+          d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.39a4.6 4.6 0 0 1-2 3.02v2.5h3.24c1.9-1.75 2.97-4.34 2.97-7.35Z"
+        />
+        <path
+          fill="#34A853"
+          d="M12 22c2.7 0 4.96-.9 6.61-2.43l-3.24-2.5c-.9.6-2.05.96-3.37.96-2.59 0-4.79-1.75-5.58-4.1H3.07v2.57A10 10 0 0 0 12 22Z"
+        />
+        <path
+          fill="#FBBC05"
+          d="M6.42 13.93A5.96 5.96 0 0 1 6.1 12c0-.67.11-1.31.32-1.93V7.5H3.07A10 10 0 0 0 2 12c0 1.61.38 3.14 1.07 4.5l3.35-2.57Z"
+        />
+        <path
+          fill="#EA4335"
+          d="M12 5.97c1.47 0 2.79.5 3.83 1.5l2.87-2.88C16.95 2.96 14.7 2 12 2A10 10 0 0 0 3.07 7.5l3.35 2.57c.79-2.35 2.99-4.1 5.58-4.1Z"
+        />
+      </svg>
+    )
+  }
 
-const initialAuditEvents: AuditEvent[] = [
-  {
-    id: 'aud-001',
-    kind: 'webhook',
-    title: 'Webhook validated',
-    detail: 'Stripe checkout event passed schema checks and was queued for relay.',
-    target: 'Stripe',
-    timestamp: '09:15:11',
-  },
-  {
-    id: 'aud-002',
-    kind: 'rule',
-    title: 'Rule test passed',
-    detail: 'Keyword trigger matched the hot DM transcript and queued the checkout branch.',
-    target: 'rule-001',
-    timestamp: '09:16:02',
-  },
-  {
-    id: 'aud-003',
-    kind: 'connector',
-    title: 'Meta CAPI connector ready',
-    detail: 'Server-event naming and match keys are ready for the next export.',
-    target: 'Meta CAPI',
-    timestamp: '09:17:44',
-  },
-]
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
+      <path
+        fill="currentColor"
+        d="M12 .5a12 12 0 0 0-3.79 23.38c.6.11.82-.26.82-.58v-2.02c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.72.08-.72 1.2.09 1.83 1.23 1.83 1.23 1.08 1.83 2.82 1.3 3.51.99.11-.77.42-1.3.77-1.59-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.46-2.38 1.23-3.22-.12-.3-.53-1.53.12-3.18 0 0 1-.32 3.3 1.23a11.46 11.46 0 0 1 6 0c2.3-1.55 3.29-1.23 3.29-1.23.66 1.65.25 2.88.13 3.18.77.84 1.23 1.91 1.23 3.22 0 4.62-2.81 5.65-5.49 5.95.43.37.82 1.1.82 2.22v3.3c0 .32.21.69.83.58A12 12 0 0 0 12 .5Z"
+      />
+    </svg>
+  )
+}
 
-const defaultDeliveryQueue: DeliveryItem[] = [
-  {
-    id: 'dq-001',
-    connector: 'Stripe',
-    channel: 'checkout_handoff',
-    target: '@miamoves',
-    payloadLabel: 'InitiateCheckout',
-    status: 'delivered',
-    lastAttempt: '09:15:11',
-    note: 'Low-ticket checkout link delivered after DM qualification.',
-  },
-  {
-    id: 'dq-002',
-    connector: 'GHL',
-    channel: 'consult_routing',
-    target: '@evanbuilds',
-    payloadLabel: 'BookingCreated',
-    status: 'processing',
-    lastAttempt: '14:30:02',
-    note: 'Consult lead routed to closer and reminder sequence started.',
-  },
-  {
-    id: 'dq-003',
-    connector: 'Meta CAPI',
-    channel: 'server_events',
-    target: '@jadeteaches',
-    payloadLabel: 'Purchase',
-    status: 'queued',
-    lastAttempt: '08:06:49',
-    note: 'Purchase payload normalized and waiting for the next relay window.',
-  },
-]
+function inferScenarioIdFromStage(stage?: FunnelStage) {
+  if (stage === 'won') {
+    return 'scenario-003'
+  }
+
+  if (stage === 'booked' || stage === 'no-show' || stage === 'recovery') {
+    return 'scenario-002'
+  }
+
+  return 'scenario-001'
+}
 
 const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   'scenario-001': {
@@ -346,33 +421,19 @@ function readPersistedState() {
   }
 }
 
+function isAuthError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401
+}
+
 function App() {
   const persisted = readPersistedState()
-  const defaultWebhookHistory: WebhookEvent[] = [
-    {
-      id: 'wh-001',
-      label: 'DM inbound received',
-      payload: JSON.stringify(scenarioRuntimes['scenario-001'].payloads[0], null, 2),
-    },
-    {
-      id: 'wh-002',
-      label: 'Call marked no-show',
-      payload: JSON.stringify(scenarioRuntimes['scenario-002'].payloads[2], null, 2),
-    },
-  ]
   const defaultRuleDrafts: RuleDraft[] = automationRules.map((rule) => ({
     ...rule,
     enabled: true,
   }))
-  const defaultLeadRecords: Lead[] = leads.map((lead) => ({
-    ...lead,
-    tags: [...lead.tags],
-  }))
-  const defaultBookingRecords: Booking[] = bookings.map((booking) => ({
-    ...booking,
-  }))
   const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
   const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
+  const [selectedLeadId, setSelectedLeadId] = useState(persisted?.selectedLeadId ?? '')
   const [leadQuery, setLeadQuery] = useState(persisted?.leadQuery ?? '')
   const [leadStageFilter, setLeadStageFilter] = useState<FunnelStage | 'all'>(
     persisted?.leadStageFilter ?? 'all',
@@ -384,42 +445,24 @@ function App() {
   const [webhookInput, setWebhookInput] = useState(
     JSON.stringify(scenarioRuntimes[demoScenarios[0].id].payloads[0], null, 2),
   )
-  const [leadRecords, setLeadRecords] = useState<Lead[]>(
-    Array.isArray(persisted?.leadRecords) ? persisted.leadRecords : defaultLeadRecords,
-  )
-  const [bookingRecords, setBookingRecords] = useState<Booking[]>(
-    Array.isArray(persisted?.bookingRecords) ? persisted.bookingRecords : defaultBookingRecords,
-  )
-  const [deliveryQueue, setDeliveryQueue] = useState<DeliveryItem[]>(
-    Array.isArray(persisted?.deliveryQueue) ? persisted.deliveryQueue : defaultDeliveryQueue,
-  )
-  const [webhookHistory, setWebhookHistory] = useState<WebhookEvent[]>(
-    Array.isArray(persisted?.webhookHistory) ? persisted.webhookHistory : defaultWebhookHistory,
-  )
+  const [leadRecords, setLeadRecords] = useState<Lead[]>([])
+  const [conversationRecords, setConversationRecords] = useState<Conversation[]>([])
+  const [bookingRecords, setBookingRecords] = useState<Booking[]>([])
+  const [onboardingRuns, setOnboardingRuns] = useState<OnboardingRun[]>([])
+  const [queueRecords, setQueueRecords] = useState<QueueLead[]>([])
+  const [leadTimeline, setLeadTimeline] = useState<LeadTimelineEntry[]>([])
+  const [deliveryQueue, setDeliveryQueue] = useState<DeliveryItem[]>([])
+  const [webhookHistory, setWebhookHistory] = useState<WebhookEvent[]>([])
   const [ruleDrafts] = useState<RuleDraft[]>(
     Array.isArray(persisted?.ruleDrafts) ? persisted.ruleDrafts : defaultRuleDrafts,
   )
-  const [connectorStates, setConnectorStates] = useState<Record<string, ConnectorState>>(
-    persisted?.connectorStates && typeof persisted.connectorStates === 'object'
-      ? persisted.connectorStates
-      : defaultConnectorStates,
-  )
-  const [operatorNotesHistory, setOperatorNotesHistory] = useState<OperatorNote[]>(
-    Array.isArray(persisted?.operatorNotesHistory) ? persisted.operatorNotesHistory : [],
-  )
+  const [connectorStates, setConnectorStates] = useState<Record<string, ConnectorState>>({})
+  const [operatorNotesHistory, setOperatorNotesHistory] = useState<OperatorNote[]>([])
   const [auditQuery, setAuditQuery] = useState('')
   const [auditKindFilter, setAuditKindFilter] = useState<'all' | AuditKind>('all')
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(
-    Array.isArray(persisted?.auditEvents) ? persisted.auditEvents : initialAuditEvents,
-  )
-  const [liveTestRuns, setLiveTestRuns] = useState<LiveTestRun[]>(
-    Array.isArray(persisted?.liveTestRuns) ? persisted.liveTestRuns : [],
-  )
-  const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>(
-    persisted?.ruleTestResults && typeof persisted.ruleTestResults === 'object'
-      ? persisted.ruleTestResults
-      : {},
-  )
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
+  const [liveTestRuns, setLiveTestRuns] = useState<LiveTestRun[]>([])
+  const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>({})
   const [webhookResult, setWebhookResult] = useState<{
     status: 'accepted' | 'rejected'
     message: string
@@ -428,39 +471,114 @@ function App() {
     persisted?.workbenchTab ?? 'funnel',
   )
   const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? 'operations')
+  const [dashboardSummary, setDashboardSummary] = useState<{
+    leadsToday: number
+    bookedCalls: number
+    recoveredNoShows: number
+    stripeRevenue: number
+    pipelineBreakdown?: Record<string, number>
+  } | null>(null)
+  const [reportsOverview, setReportsOverview] = useState<ReportsOverview | null>(null)
+  const [syncStatus, setSyncStatus] = useState<{
+    configured: boolean
+    realtime: {
+      pollMs: number
+      connected: boolean
+      lastEventAt: string | null
+      eventCount: number
+    }
+    remote:
+      | {
+          found?: boolean
+          source?: string | null
+          digest?: string | null
+          updatedAt?: string | null
+        }
+      | { error: string }
+    mirror: Record<string, number> | { error: string }
+  } | null>(null)
+  const [syncDiff, setSyncDiff] = useState<{
+    ok: boolean
+    diff?: {
+      leads: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      bookings: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      conversations: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      deliveries: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      attempts: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      audit: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      notes: { localOnly: string[]; remoteOnly: string[]; shared: number }
+      tests: { localOnly: string[]; remoteOnly: string[]; shared: number }
+    }
+    message?: string
+  } | null>(null)
+  const [syncPending, setSyncPending] = useState<'status' | 'diff' | 'push' | 'pull' | 'reconcile' | null>(null)
+  const [intakeHandle, setIntakeHandle] = useState('')
+  const [intakeMessage, setIntakeMessage] = useState('')
+  const [intakeSource, setIntakeSource] = useState('instagram_dm')
+  const [intakeOffer, setIntakeOffer] = useState('Low-ticket challenge')
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>('idle')
+  const [authSession, setAuthSession] = useState<{ sub: string; bypass?: boolean } | null>(null)
+  const [loginUsername, setLoginUsername] = useState('operator')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [authPending, setAuthPending] = useState(false)
+  const autoLoginAttemptedRef = useRef(false)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [oauthProviderPending, setOauthProviderPending] = useState<'google' | 'github' | null>(null)
+  const [proofPreview, setProofPreview] = useState<{
+    title: string
+    payload: string
+  } | null>(null)
+  const [toolArtifact, setToolArtifact] = useState<{
+    title: string
+    payload: string
+  } | null>(null)
+  const [recipePending, setRecipePending] = useState<string | null>(null)
+  const [toolPending, setToolPending] = useState<string | null>(null)
+  const [dispatchPending, setDispatchPending] = useState<'slack' | 'sheets' | null>(null)
+  const [runtimeResetPending, setRuntimeResetPending] = useState(false)
 
+  const activeLead =
+    leadRecords.find((lead) => lead.id === selectedLeadId) ??
+    leadRecords.find((lead) => lead.id === queueRecords[0]?.id) ??
+    leadRecords[0] ??
+    null
   const activeScenario = useMemo(
-    () => demoScenarios.find((scenario) => scenario.id === scenarioId) ?? demoScenarios[0],
-    [scenarioId],
+    () =>
+      demoScenarios.find((scenario) => scenario.id === inferScenarioIdFromStage(activeLead?.stage)) ??
+      demoScenarios.find((scenario) => scenario.id === scenarioId) ??
+      demoScenarios[0],
+    [activeLead?.stage, scenarioId],
   )
   const runtime = scenarioRuntimes[activeScenario.id]
-  const activeLead = leadRecords.find((lead) => lead.id === activeScenario.leadId) ?? leadRecords[0]
   const activeConversation =
-    conversations.find((conversation) => conversation.id === activeScenario.conversationId) ??
-    conversations[0]
-  const activeBooking = bookingRecords.find((booking) => booking.id === activeScenario.bookingId)
-  const visibleMessages = activeConversation.messages.slice(0, runtime.visibleMessageCount[stepIndex])
+    conversationRecords.find((conversation) => conversation.leadId === activeLead?.id) ?? null
+  const activeBooking = bookingRecords.find((booking) => booking.leadId === activeLead?.id) ?? null
+  const activeOnboardingRun =
+    onboardingRuns.find((run) => run.leadId === activeLead?.id) ?? null
+  const onboardingProofRuns = onboardingRuns.length
+    ? onboardingRuns
+    : activeOnboardingRun
+      ? [activeOnboardingRun]
+      : []
+  const onboardingCompleted = onboardingRuns.filter((run) => run.status === 'provisioned').length
+  const visibleMessages = activeConversation
+    ? activeConversation.messages.slice(
+        0,
+        Math.min(
+          activeConversation.messages.length,
+          runtime.visibleMessageCount[stepIndex] ?? activeConversation.messages.length,
+        ),
+      )
+    : []
   const progress = ((stepIndex + 1) / runtime.stepLabels.length) * 100
   const activePayload = runtime.payloads[stepIndex]
   const activeMetricValue = runtime.metricValues[stepIndex]
-  const filteredLeads = leadRecords.filter((lead) => {
-    const matchesStage = leadStageFilter === 'all' ? true : lead.stage === leadStageFilter
-    const query = leadQuery.trim().toLowerCase()
-    const haystack =
-      `${lead.name} ${lead.handle} ${lead.source} ${lead.offer} ${lead.owner} ${lead.tags.join(' ')}`.toLowerCase()
-    return matchesStage && haystack.includes(query)
-  })
+  const filteredLeads = queueRecords
   const filteredDeliveryQueue = deliveryQueue.filter((item) =>
     deliveryFilter === 'all' ? true : item.status === deliveryFilter,
   )
-  const prioritizedLeads = [...filteredLeads].sort((left, right) => {
-    const stageDifference = leadStagePriority[left.stage] - leadStagePriority[right.stage]
-    if (stageDifference !== 0) {
-      return stageDifference
-    }
-
-    return left.lastTouch.localeCompare(right.lastTouch)
-  })
+  const prioritizedLeads = filteredLeads
   const prioritizedDeliveryQueue = [...filteredDeliveryQueue].sort((left, right) => {
     const statusDifference = deliveryStatusPriority[left.status] - deliveryStatusPriority[right.status]
     if (statusDifference !== 0) {
@@ -469,32 +587,31 @@ function App() {
 
     return right.lastAttempt.localeCompare(left.lastAttempt)
   })
-  const leadScenarios = useMemo(
-    () =>
-      demoScenarios.reduce<Record<string, string>>((accumulator, scenario) => {
-        accumulator[scenario.leadId] = scenario.id
-        return accumulator
-      }, {}),
-    [],
-  )
-  const activeLeadQueue = filteredDeliveryQueue.filter((item) => item.target === activeLead.handle)
-  const activeLeadTimeline = eventLog.filter((entry) => entry.leadId === activeLead.id)
-  const scenarioEvents = eventLog.filter((entry) =>
-    runtime.visibleEventIds[stepIndex]?.includes(entry.id),
-  )
-  const activeLeadAudit = auditEvents.filter((entry) =>
-    `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.id) ||
-    `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.handle.toLowerCase()),
-  )
+  const activeLeadQueue = activeLead
+    ? filteredDeliveryQueue.filter((item) => item.target === activeLead.handle)
+    : []
+  const activeLeadTimeline = leadTimeline
+  const activeAutomationTrail = activeLeadTimeline.slice(0, 4).map((entry) => entry.title)
+  const activeLeadAudit = activeLead
+    ? auditEvents.filter((entry) =>
+        `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.id) ||
+        `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.handle.toLowerCase()),
+      )
+    : []
+  const liveConsoleReady = runtimeStatus === 'ready'
+  const hasLiveLead = Boolean(activeLead)
   const missionStats = useMemo(() => {
-    const leadsToday = leadRecords.length
-    const bookedCalls = bookingRecords.filter(
-      (booking) => booking.status === 'booked' || booking.status === 'reminded',
-    ).length
-    const recoveredNoShows = bookingRecords.filter((booking) => booking.status === 'recovered').length
-    const stripeRevenue = leadRecords
-      .filter((lead) => lead.stage === 'won')
-      .reduce((total, lead) => total + parseMoneyValue(lead.budget), 0)
+    const leadsToday = dashboardSummary?.leadsToday ?? leadRecords.length
+    const bookedCalls =
+      dashboardSummary?.bookedCalls ??
+      bookingRecords.filter((booking) => booking.status === 'booked' || booking.status === 'reminded')
+        .length
+    const recoveredNoShows =
+      dashboardSummary?.recoveredNoShows ??
+      bookingRecords.filter((booking) => booking.status === 'recovered').length
+    const stripeRevenue =
+      dashboardSummary?.stripeRevenue ??
+      leadRecords.filter((lead) => lead.stage === 'won').reduce((total, lead) => total + parseMoneyValue(lead.budget), 0)
 
     return [
       {
@@ -518,7 +635,7 @@ function App() {
         note: 'Live SQL snapshot from won funnel paths',
       },
     ]
-  }, [bookingRecords, leadRecords])
+  }, [bookingRecords, dashboardSummary, leadRecords])
 
   const railMetrics = useMemo(
     () => [
@@ -533,7 +650,7 @@ function App() {
       },
       {
         label: 'Recovery backlog',
-        value: String(bookingRecords.filter((booking) => booking.status === 'no-show').length),
+        value: String(queueRecords.filter((entry) => entry.lane === 'recovery').length),
         delta: 'Live no-show items waiting for a recovery branch.',
       },
       {
@@ -547,14 +664,352 @@ function App() {
         delta: 'Queued outbox items awaiting relay completion.',
       },
     ],
-    [bookingRecords, deliveryQueue, leadRecords, liveTestRuns.length],
+    [deliveryQueue, leadRecords, liveTestRuns.length, queueRecords],
   )
+  const revenueSourceRows = useMemo(() => {
+    const sourceBreakdown = reportsOverview?.sourceBreakdown ?? {}
+    const total = reportsOverview?.queueSummary.total ?? 0
+
+    return Object.entries(sourceBreakdown)
+      .map(([source, count]) => ({
+        source,
+        count,
+        share: total > 0 ? Math.round((count / total) * 100) : 0,
+      }))
+      .sort((left, right) => right.count - left.count)
+  }, [reportsOverview])
+  const revenueConnectorRows = useMemo(() => {
+    return [...(reportsOverview?.connectors ?? [])].sort((left, right) => {
+      const leftScore = Number(left.queued > 0) + Number(left.processing > 0) * 2
+      const rightScore = Number(right.queued > 0) + Number(right.processing > 0) * 2
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore
+      }
+      return right.runs - left.runs
+    })
+  }, [reportsOverview])
+  const revenueFollowUps = useMemo(() => {
+    const items: Array<{
+      label: string
+      detail: string
+      action?: string
+    }> = []
+
+    if ((reportsOverview?.queueSummary.recovery ?? 0) > 0) {
+      items.push({
+        label: 'Recovery lane is live',
+        detail: `${reportsOverview?.queueSummary.recovery ?? 0} leads are waiting on no-show follow-up.`,
+        action: 'Queue a recovery relay',
+      })
+    }
+
+    if ((reportsOverview?.outboxSummary.queued ?? 0) > 0) {
+      items.push({
+        label: 'Outbox still has work',
+        detail: `${reportsOverview?.outboxSummary.queued ?? 0} delivery items remain queued for relay.`,
+        action: 'Retry the next item',
+      })
+    }
+
+    const staleConnector = revenueConnectorRows.find((entry) => entry.status !== 'healthy')
+    if (staleConnector) {
+      items.push({
+        label: `${staleConnector.name} needs a ping`,
+        detail: staleConnector.note,
+        action: 'Ping connector',
+      })
+    }
+
+    if (!items.length) {
+      items.push({
+        label: 'Everything is caught up',
+        detail: 'The report snapshot has no urgent backlog right now.',
+      })
+    }
+
+    return items
+  }, [reportsOverview, revenueConnectorRows])
+  const failedDeliveries = useMemo(
+    () => deliveryQueue.filter((item) => item.status === 'failed'),
+    [deliveryQueue],
+  )
+  const capiRailEvents = useMemo(() => {
+    const eventKeys = ['Lead', 'InitiateCheckout', 'Purchase'] as const
+
+    return eventKeys.map((eventName) => {
+      const liveEvent =
+        deliveryQueue.find(
+          (entry) =>
+            entry.connector === 'Meta CAPI' &&
+            entry.payloadLabel === eventName &&
+            entry.target === (activeLead?.handle ?? entry.target),
+        ) ?? deliveryQueue.find((entry) => entry.payloadLabel === eventName)
+
+      const fallback = capiEvents.find((entry) => entry.eventName === eventName)
+      if (!liveEvent) {
+        return fallback ?? {
+          eventName,
+          source: 'Live relay unavailable',
+          matchKeys: ['em', 'ph', 'external_id'],
+          payloadStatus: 'Waiting on live relay',
+        }
+      }
+
+      return {
+        eventName,
+        source: `${liveEvent.connector} / ${liveEvent.channel}`,
+        matchKeys:
+          eventName === 'Purchase'
+            ? ['em', 'ph', 'external_id', 'value']
+            : ['em', 'ph', 'external_id'],
+        payloadStatus: `${liveEvent.status} • ${liveEvent.note}`,
+      }
+    })
+  }, [activeLead?.handle, deliveryQueue])
+  const attentionConnectors = useMemo(
+    () =>
+      Object.entries(connectorStates)
+        .filter(([, state]) => state.status !== 'ready')
+        .map(([name, state]) => ({ name, ...state })),
+    [connectorStates],
+  )
+  const toolTemplates: OperatorToolTemplate[] = operatorToolTemplates
   const visibleAuditEvents = auditEvents
     .filter((entry) => (auditKindFilter === 'all' ? true : entry.kind === auditKindFilter))
     .filter((entry) => {
       const haystack = `${entry.title} ${entry.detail} ${entry.target} ${entry.timestamp}`.toLowerCase()
       return haystack.includes(auditQuery.toLowerCase())
     })
+  const requirementCoverage = useMemo(
+    () => {
+      const zapierRunCount = (connectorStates['Zapier']?.runs ?? 0) + (connectorStates['Make']?.runs ?? 0)
+      const zapierQueue = deliveryQueue.filter((item) =>
+        ['Zapier', 'Make'].includes(item.connector),
+      ).length
+      const typeformCount = deliveryQueue.filter((item) => item.connector === 'Typeform').length
+      const platformQueue = deliveryQueue.filter((item) =>
+        ['Kajabi', 'Skool', 'Discord'].includes(item.connector),
+      ).length
+
+      return [
+        {
+          label: 'JavaScript automation glue',
+          status: 'shipped',
+          detail:
+            'One Node runtime drives DM intake, booking routing, payment handoff, onboarding, exports, and realtime.',
+        },
+        {
+          label: 'Claude Code + repo modules',
+          status: `${repoModules.length} modules`,
+          detail: 'The CLI-built repo contains DM sprint, GHL recovery, and dashboard modules for rapid iteration.',
+        },
+        {
+          label: 'ManyChat / Typeform automation',
+          status: `${queueRecords.length} live leads`,
+          detail: `IG DM, story reply, and Typeform (${typeformCount}) forms all feed the DM sprint automation and rule lab.`,
+        },
+        {
+          label: 'Zapier / Make mastery',
+          status: zapierRunCount ? `${zapierRunCount} relay checks` : 'modeled',
+          detail: `Zapier and Make stay nearly live with ${zapierQueue} queued relays and ping-friendly health states.`,
+        },
+        {
+          label: 'GHL pipelines + webhooks',
+          status: `${bookingRecords.length} booking states`,
+          detail: `Booking updates flow through webhook mutations into GHL routing, no-show recovery, and closer ownership.`,
+        },
+        {
+          label: 'Meta CAPI + standard events',
+          status: `${deliveryQueue.filter((item) => item.connector === 'Meta CAPI').length} queued events`,
+          detail:
+            'Purchase and recovery events are normalized into server-event payloads with match keys and replayable validation.',
+        },
+        {
+          label: 'Apify / scraper scenarios',
+          status: `${liveTestRuns.length} runs`,
+          detail:
+            'SQL-backed scenario runs simulate Apify scraper output, giving fresh social signals to the automation rules.',
+        },
+        {
+          label: 'Slack / Sheets reporting',
+          status: reportsOverview ? 'export-ready' : 'staged',
+          detail: 'The backend generates live Slack summaries and Google Sheets snapshots from queue + revenue state.',
+        },
+        {
+          label: 'Kajabi / Skool / Discord handoff',
+          status: `${platformQueue} queued handoffs`,
+          detail:
+            'Kajabi, Skool, and Discord pipelines sit behind the automation layer for course, community, and alert handoffs.',
+        },
+      ]
+    },
+    [
+      bookingRecords.length,
+      connectorStates,
+      deliveryQueue,
+      liveTestRuns.length,
+      queueRecords.length,
+      reportsOverview,
+      repoModules.length,
+    ],
+  )
+  const executionRecipes = useMemo(
+    () => [
+      {
+        id: 'dm-sprint',
+        title: 'DM sprint funnel',
+        systems: 'Instagram DM, ManyChat logic, Stripe',
+        detail: 'Capture an inbound DM, classify intent, tag the lead, and queue checkout.',
+      },
+      {
+        id: 'ghl-recovery',
+        title: 'No-show recovery',
+        systems: 'GHL, Make, recovery webhook',
+        detail: 'Move the active lead into a no-show branch and queue the recovery relay.',
+      },
+      {
+        id: 'stripe-capi',
+        title: 'Payment to CAPI',
+        systems: 'Stripe webhook, Meta CAPI',
+        detail: 'Mark a payment complete and queue the purchase server event trail.',
+      },
+      {
+        id: 'onboarding',
+        title: 'Client onboarding autopilot',
+        systems: 'Make, provisioning workflow',
+        detail: 'Provision folders, SOP assets, and onboarding records for the active customer.',
+      },
+    ],
+    [],
+  )
+  const implementationSnippets = useMemo(() => {
+    const handle = activeLead?.handle ?? '@demoautomation'
+    const payload = JSON.stringify(activePayload, null, 2)
+    const jsSnippet = `const response = await fetch('/api/workflows/dm-intake', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({
+    handle: '${handle}',
+    source: '${activeLead?.source ?? 'instagram_dm'}',
+    offer: '${activeLead?.offer ?? 'Low-ticket challenge'}',
+    message: 'price for the sprint?'
+  }),
+})`
+
+    const pythonSnippet = `import requests
+
+requests.post(
+    "https://cobe.aparcedo.org/api/workflows/booking-update",
+    json={
+        "handle": "${handle}",
+        "status": "no-show",
+        "slot": "${activeBooking?.slot ?? '2026-04-05T15:00:00Z'}",
+    },
+    cookies={"cobe_admin_session": "<session-cookie>"},
+)`
+
+    const webhookSnippet = `POST /api/webhooks/validate
+Content-Type: application/json
+
+${payload}`
+
+    const ghlSnippet = `GHL trigger: appointment status changed
+if status == no-show:
+  - apply tag: no-show
+  - move pipeline stage: recovery
+  - post webhook to /api/workflows/booking-update`
+
+    return [
+      { label: 'JavaScript glue', body: jsSnippet },
+      { label: 'Python webhook', body: pythonSnippet },
+      { label: 'Webhook payload', body: webhookSnippet },
+      { label: 'GHL routing', body: ghlSnippet },
+    ]
+  }, [activeBooking?.slot, activeLead?.handle, activeLead?.offer, activeLead?.source, activePayload])
+
+  const clearLiveConsoleState = useCallback(() => {
+    setLeadRecords([])
+    setConversationRecords([])
+    setBookingRecords([])
+    setQueueRecords([])
+    setLeadTimeline([])
+    setDeliveryQueue([])
+    setWebhookHistory([])
+    setConnectorStates({})
+    setOperatorNotesHistory([])
+    setAuditEvents([])
+    setLiveTestRuns([])
+    setRuleTestResults({})
+    setDashboardSummary(null)
+    setReportsOverview(null)
+    setSyncStatus(null)
+    setSyncDiff(null)
+    setSyncPending(null)
+    setToolArtifact(null)
+    setToolPending(null)
+    setSelectedLeadId('')
+    setRuntimeStatus('idle')
+  }, [])
+
+  const markRuntimeReady = () => {
+    setRuntimeStatus('ready')
+    setApiError(null)
+  }
+
+  const handleRuntimeFailure = useCallback(
+    (error: unknown, fallbackMessage: string, options: { clearLiveState?: boolean } = {}) => {
+      if (isAuthError(error)) {
+        clearLiveConsoleState()
+        setAuthSession(null)
+        setAuthStatus('auth_required')
+        setApiError(error.message || 'Your session expired. Log in again.')
+        return
+      }
+
+      if (options.clearLiveState) {
+        clearLiveConsoleState()
+      }
+      setRuntimeStatus('degraded')
+      setApiError(error instanceof Error ? error.message : fallbackMessage)
+    },
+    [clearLiveConsoleState],
+  )
+
+  const bootstrapSession = useCallback(async () => {
+    setApiError(null)
+    setAuthStatus('checking')
+
+    try {
+      const session = await fetchAdminSession()
+      setAuthSession(session.session)
+      setAuthStatus('authenticated')
+    } catch (error) {
+      clearLiveConsoleState()
+      setAuthSession(null)
+      if (isLocalDemoHost() && !autoLoginAttemptedRef.current) {
+        autoLoginAttemptedRef.current = true
+        try {
+          await loginAdmin(AUTO_DEMO_USERNAME, AUTO_DEMO_PASSWORD)
+          const session = await fetchAdminSession()
+          setAuthSession(session.session)
+          setAuthStatus('authenticated')
+          setRuntimeStatus('loading')
+          setApiError(null)
+          return
+        } catch {
+          setAuthStatus('auth_required')
+          setApiError('Auto demo login is unavailable. Use the form above to sign in.')
+          return
+        }
+      }
+
+      setAuthStatus('auth_required')
+      if (!isAuthError(error)) {
+        setApiError(error instanceof Error ? error.message : 'Failed to check the current session.')
+      }
+    }
+  }, [clearLiveConsoleState])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -566,39 +1021,24 @@ function App() {
       JSON.stringify({
         scenarioId,
         stepIndex,
+        selectedLeadId,
         leadQuery,
         leadStageFilter,
         deliveryFilter,
         operatorNotes,
         workbenchTab,
         railTab,
-        leadRecords,
-        bookingRecords,
-        deliveryQueue,
-        webhookHistory,
         ruleDrafts,
-        connectorStates,
-        operatorNotesHistory,
-        auditEvents,
-        liveTestRuns,
-        ruleTestResults,
       }),
     )
   }, [
-    bookingRecords,
     deliveryFilter,
     operatorNotes,
-    auditEvents,
-    operatorNotesHistory,
-    connectorStates,
-    deliveryQueue,
     leadQuery,
-    leadRecords,
     leadStageFilter,
-    liveTestRuns,
     ruleDrafts,
-    ruleTestResults,
     scenarioId,
+    selectedLeadId,
     workbenchTab,
     railTab,
     stepIndex,
@@ -606,22 +1046,343 @@ function App() {
   ])
 
   useEffect(() => {
+    void bootstrapSession()
+  }, [bootstrapSession])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (window.location.pathname !== '/auth/callback') {
+      return
+    }
+
+    const finalizeOauth = async () => {
+      setAuthPending(true)
+      setApiError(null)
+      setAuthStatus('checking')
+
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+      const queryParams = new URLSearchParams(window.location.search)
+      const accessToken = hashParams.get('access_token') || queryParams.get('access_token') || ''
+      const errorDescription =
+        queryParams.get('error_description') ||
+        hashParams.get('error_description') ||
+        queryParams.get('error') ||
+        hashParams.get('error') ||
+        ''
+
+      if (!accessToken) {
+        setAuthPending(false)
+        setAuthStatus('auth_required')
+        setApiError(errorDescription || 'OAuth callback did not return an access token.')
+        window.history.replaceState({}, '', '/')
+        return
+      }
+
+      try {
+        const result = await createOauthSession(accessToken)
+        setAuthSession(result.session)
+        setAuthStatus('authenticated')
+        setRuntimeStatus('loading')
+        window.localStorage.setItem(OAUTH_SESSION_EVENT, String(Date.now()))
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: OAUTH_SESSION_EVENT }, window.location.origin)
+        }
+        window.history.replaceState({}, '', '/')
+        if (window.opener && !window.opener.closed) {
+          window.close()
+        }
+      } catch (error) {
+        clearLiveConsoleState()
+        setAuthSession(null)
+        setAuthStatus('auth_required')
+        setApiError(error instanceof Error ? error.message : 'OAuth login failed.')
+        window.history.replaceState({}, '', '/')
+      } finally {
+        setAuthPending(false)
+      }
+    }
+
+    void finalizeOauth()
+  }, [clearLiveConsoleState])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const refreshSession = () => {
+      startTransition(() => {
+        void bootstrapSession()
+      })
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return
+      }
+
+      if (event.data?.type === OAUTH_SESSION_EVENT) {
+        refreshSession()
+      }
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === OAUTH_SESSION_EVENT && event.newValue) {
+        refreshSession()
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    window.addEventListener('storage', handleStorage)
+
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [bootstrapSession])
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      clearLiveConsoleState()
+      return
+    }
+
     let cancelled = false
 
-    fetchBootstrap()
-      .then((snapshot) => {
+    setRuntimeStatus('loading')
+    setApiError(null)
+
+    Promise.all([fetchBootstrap(), fetchReportsOverview(), fetchSyncStatus()])
+      .then(([snapshot, reports, sync]) => {
         if (!cancelled) {
           applySnapshot(snapshot)
+          setReportsOverview(reports)
+          setSyncStatus(sync)
+          markRuntimeReady()
         }
       })
-      .catch(() => {
-        // Keep the seeded frontend state when the API is unavailable.
+      .catch((error) => {
+        if (!cancelled) {
+          handleRuntimeFailure(error, 'Failed to load the authenticated console.', {
+            clearLiveState: true,
+          })
+        }
       })
 
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authStatus, clearLiveConsoleState, handleRuntimeFailure])
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      setQueueRecords([])
+      return
+    }
+
+    let cancelled = false
+
+    fetchQueue({
+      q: leadQuery,
+      stage: leadStageFilter === 'all' ? undefined : leadStageFilter,
+    })
+      .then((queue) => {
+        if (!cancelled) {
+          setQueueRecords(queue)
+          if (!selectedLeadId && queue[0]?.id) {
+            setSelectedLeadId(queue[0].id)
+          }
+          if (!queue[0]?.id) {
+            setSelectedLeadId('')
+          }
+          markRuntimeReady()
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          handleRuntimeFailure(error, 'Failed to load the live queue.', {
+            clearLiveState: true,
+          })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authStatus, bookingRecords.length, deliveryQueue.length, handleRuntimeFailure, leadQuery, leadStageFilter, selectedLeadId])
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      setLeadTimeline([])
+      return
+    }
+
+    if (!activeLead?.id) {
+      setLeadTimeline([])
+      return
+    }
+
+    let cancelled = false
+
+    fetchLeadTimeline(activeLead.id)
+      .then((result) => {
+        if (!cancelled) {
+          setLeadTimeline(result.events ?? [])
+          markRuntimeReady()
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          handleRuntimeFailure(error, 'Failed to load the active workflow timeline.', {
+            clearLiveState: true,
+          })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeLead?.id, authStatus, handleRuntimeFailure])
+
+  useEffect(() => {
+    if (!activeLead?.id) {
+      return
+    }
+
+    if (queueRecords.some((entry) => entry.id === activeLead.id)) {
+      return
+    }
+
+    if (queueRecords[0]?.id) {
+      setSelectedLeadId(queueRecords[0].id)
+    }
+  }, [activeLead?.id, queueRecords])
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      return
+    }
+
+    let closed = false
+    let stream: EventSource | null = null
+
+    try {
+      stream = new EventSource('/api/realtime/stream')
+      const refreshState = () => {
+        startTransition(() => {
+          fetchBootstrap()
+            .then((snapshot) => {
+              if (!closed) {
+                applySnapshot(snapshot)
+                markRuntimeReady()
+              }
+            })
+            .catch((error) => {
+              if (!closed) {
+                handleRuntimeFailure(
+                  error,
+                  'Realtime refresh failed while loading the console state.',
+                  {
+                    clearLiveState: true,
+                  },
+                )
+              }
+            })
+          fetchQueue({
+            q: leadQuery,
+            stage: leadStageFilter === 'all' ? undefined : leadStageFilter,
+          })
+            .then((queue) => {
+              if (!closed) {
+                setQueueRecords(queue)
+                if (!queue[0]?.id) {
+                  setSelectedLeadId('')
+                }
+                markRuntimeReady()
+              }
+            })
+            .catch((error) => {
+              if (!closed) {
+                handleRuntimeFailure(error, 'Realtime refresh failed while loading the live queue.', {
+                  clearLiveState: true,
+                })
+              }
+            })
+          fetchReportsOverview()
+            .then((reports) => {
+              if (!closed) {
+                setReportsOverview(reports)
+                markRuntimeReady()
+              }
+            })
+            .catch((error) => {
+              if (!closed) {
+                handleRuntimeFailure(error, 'Realtime refresh failed while loading reports.', {
+                  clearLiveState: true,
+                })
+              }
+            })
+          fetchSyncStatus()
+            .then((sync) => {
+              if (!closed) {
+                setSyncStatus(sync)
+                markRuntimeReady()
+              }
+            })
+            .catch((error) => {
+              if (!closed) {
+                handleRuntimeFailure(error, 'Realtime refresh failed while loading sync status.', {
+                  clearLiveState: true,
+                })
+              }
+            })
+          if (activeLead?.id) {
+            fetchLeadTimeline(activeLead.id)
+              .then((result) => {
+                if (!closed) {
+                  setLeadTimeline(result.events ?? [])
+                  markRuntimeReady()
+                }
+              })
+              .catch((error) => {
+                if (!closed) {
+                  handleRuntimeFailure(error, 'Realtime refresh failed while loading the active workflow timeline.', {
+                    clearLiveState: true,
+                  })
+                }
+              })
+          }
+        })
+      }
+      ;[
+        'state.changed',
+        'sync.pushed',
+        'sync.pulled',
+        'sync.remote_changed',
+        'sync.mirror_updated',
+      ].forEach((eventName) => {
+        stream?.addEventListener(eventName, refreshState)
+      })
+      stream.addEventListener('error', () => {
+        if (!closed) {
+          setRuntimeStatus('degraded')
+          setApiError('Realtime stream disconnected. Live updates are degraded until the next successful reconnect.')
+        }
+      })
+    } catch {
+      setRuntimeStatus('degraded')
+      setApiError('Failed to start the realtime stream for the authenticated console.')
+      return
+    }
+
+    return () => {
+      closed = true
+      stream?.close()
+    }
+  }, [activeLead?.id, authStatus, handleRuntimeFailure, leadQuery, leadStageFilter])
 
   const appendAuditEvent = (
     event: Omit<AuditEvent, 'id' | 'timestamp'>,
@@ -639,7 +1400,9 @@ function App() {
 
   const applySnapshot = (snapshot: {
     leadRecords?: Lead[]
+    conversations?: Conversation[]
     bookingRecords?: Booking[]
+    onboardingRuns?: OnboardingRun[]
     webhookHistory?: WebhookEvent[]
     connectorStates?: Record<string, ConnectorState>
     deliveryQueue?: DeliveryItem[]
@@ -647,12 +1410,25 @@ function App() {
     auditEvents?: AuditEvent[]
     liveTestRuns?: LiveTestRun[]
     ruleTestResults?: Record<string, RuleTestResult>
+    dashboard?: {
+      leadsToday: number
+      bookedCalls: number
+      recoveredNoShows: number
+      stripeRevenue: number
+      pipelineBreakdown?: Record<string, number>
+    }
   }) => {
     if (snapshot.leadRecords) {
       setLeadRecords(snapshot.leadRecords)
     }
+    if (snapshot.conversations) {
+      setConversationRecords(snapshot.conversations)
+    }
     if (snapshot.bookingRecords) {
       setBookingRecords(snapshot.bookingRecords)
+    }
+    if (snapshot.onboardingRuns) {
+      setOnboardingRuns(snapshot.onboardingRuns)
     }
     if (snapshot.webhookHistory) {
       setWebhookHistory(snapshot.webhookHistory)
@@ -675,62 +1451,9 @@ function App() {
     if (snapshot.ruleTestResults) {
       setRuleTestResults(snapshot.ruleTestResults)
     }
-  }
-
-  const updateConnectorState = (name: string, patch: Partial<ConnectorState>) => {
-    setConnectorStates((current) => {
-      const existing = current[name] ?? defaultConnectorStates[name]
-      if (!existing) {
-        return current
-      }
-
-      return {
-        ...current,
-        [name]: {
-          ...existing,
-          ...patch,
-        },
-      }
-    })
-  }
-
-  const updateLeadRecord = (leadId: string, patch: Partial<Lead>) => {
-    setLeadRecords((current) =>
-      current.map((lead) => (lead.id === leadId ? { ...lead, ...patch } : lead)),
-    )
-  }
-
-  const updateBookingRecord = (bookingId: string, patch: Partial<Booking>) => {
-    setBookingRecords((current) =>
-      current.map((booking) => (booking.id === bookingId ? { ...booking, ...patch } : booking)),
-    )
-  }
-
-  const addDeliveryItem = (item: Omit<DeliveryItem, 'id'>) => {
-    setDeliveryQueue((current) => [
-      {
-        id: `dq-${String(current.length + 1).padStart(3, '0')}`,
-        ...item,
-      },
-      ...current,
-    ])
-  }
-
-  const handleScenarioChange = (nextScenarioId: string) => {
-      const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId) ?? demoScenarios[0]
-      const nextRuntime = scenarioRuntimes[nextScenario.id]
-    startTransition(() => {
-      setScenarioId(nextScenarioId)
-      setStepIndex(0)
-      setWebhookInput(JSON.stringify(nextRuntime.payloads[0], null, 2))
-      setWebhookResult(null)
-    })
-    appendAuditEvent({
-      kind: 'scenario',
-      title: 'Scenario switched',
-      detail: `Opened ${nextScenario.title} and reset the simulator to step one.`,
-      target: nextScenario.id,
-    })
+    if (snapshot.dashboard) {
+      setDashboardSummary(snapshot.dashboard)
+    }
   }
 
   const handleStepChange = (nextStepIndex: number) => {
@@ -781,37 +1504,14 @@ function App() {
         message: response.message,
       })
       return
-    } catch {
-      // Fall back to local validation when the API is unavailable.
-    }
-
-    const result = validateWebhookPayload(webhookInput)
-    if (!result.ok) {
+    } catch (error) {
+      handleRuntimeFailure(error, 'Webhook validation failed.')
       setWebhookResult({
         status: 'rejected',
-        message: result.message,
+        message: error instanceof Error ? error.message : 'Webhook validation failed.',
       })
       return
     }
-
-    setWebhookResult({
-      status: 'accepted',
-      message: 'Accepted: payload passes schema check and is ready for the simulated automation relay.',
-    })
-    setWebhookHistory((current) => [
-      {
-        id: `wh-${String(current.length + 1).padStart(3, '0')}`,
-        label: result.label,
-        payload: JSON.stringify(result.parsed, null, 2),
-      },
-      ...current,
-    ])
-    appendAuditEvent({
-      kind: 'webhook',
-      title: 'Webhook validated',
-      detail: `Accepted payload labeled ${result.label} and added it to the inbox.`,
-      target: result.label,
-    })
   }
 
   const handleWebhookReplay = (item: WebhookEvent) => {
@@ -844,6 +1544,124 @@ function App() {
     })
   }
 
+  const handleRunWorkflow = async () => {
+    if (!activeLead) {
+      setWebhookResult({
+        status: 'rejected',
+        message: 'No live lead is loaded. Restore the runtime before running a workflow.',
+      })
+      return
+    }
+
+    try {
+      let response: { snapshot?: unknown; ok?: boolean; message?: string } | null = null
+
+      if (activeScenario.id === 'scenario-001') {
+        if (stepIndex >= 2) {
+          response = await runStripePaymentRequest({
+            handle: activeLead.handle,
+            amount: parseMoneyValue(activeLead.budget) || 49,
+            offer: activeLead.offer,
+          })
+        } else {
+          response = await runDmIntakeRequest({
+            handle: activeLead.handle,
+            name: activeLead.name,
+            source: activeLead.source,
+            offer: activeLead.offer,
+            budget: activeLead.budget,
+            message: activeConversation?.messages[0]?.text ?? 'price for the sprint?',
+          })
+        }
+      } else if (activeScenario.id === 'scenario-002') {
+        response = await runBookingUpdateRequest({
+          handle: activeLead.handle,
+          status: stepIndex >= 3 ? 'recovered' : stepIndex >= 2 ? 'no-show' : 'booked',
+          slot: activeBooking?.slot ?? '2026-04-04T15:00:00Z',
+        })
+      } else {
+        response =
+          stepIndex >= 2
+            ? await runOnboardingProvisionRequest({ handle: activeLead.handle })
+            : await runStripePaymentRequest({
+                handle: activeLead.handle,
+                amount: parseMoneyValue(activeLead.budget) || 97,
+                offer: activeLead.offer,
+              })
+      }
+
+      if (response?.snapshot) {
+        applySnapshot(response.snapshot as never)
+      }
+      markRuntimeReady()
+
+      setWebhookResult({
+        status: 'accepted',
+        message:
+          response?.message ??
+          `Executed the live ${runtime.stepLabels[stepIndex].toLowerCase()} workflow against the backend.`,
+      })
+    } catch (error) {
+      handleRuntimeFailure(error, 'Workflow execution failed.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Workflow execution failed.',
+      })
+    }
+  }
+
+  const handleCaptureLead = async () => {
+    const handle = intakeHandle.trim()
+    const message = intakeMessage.trim()
+
+    if (!handle || !message) {
+      setWebhookResult({
+        status: 'rejected',
+        message: 'Handle and inbound DM are required.',
+      })
+      return
+    }
+
+    try {
+      const response = await runDmIntakeRequest({
+        handle: handle.startsWith('@') ? handle : `@${handle}`,
+        source: intakeSource,
+        offer: intakeOffer,
+        message,
+      })
+      if (response.snapshot) {
+        applySnapshot(response.snapshot)
+      }
+
+      const refreshedQueue = await fetchQueue({
+        q: handle.replace(/^@/, ''),
+      })
+      setQueueRecords((current) => {
+        const next = refreshedQueue.length ? refreshedQueue : current
+        const matched = next.find((entry) => entry.handle === (handle.startsWith('@') ? handle : `@${handle}`))
+        if (matched) {
+          setSelectedLeadId(matched.id)
+          setScenarioId(inferScenarioIdFromStage(matched.stage))
+        }
+        return next
+      })
+      markRuntimeReady()
+
+      setIntakeHandle('')
+      setIntakeMessage('')
+      setWebhookResult({
+        status: 'accepted',
+        message: response.message ?? 'Inbound DM captured and queued.',
+      })
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to capture inbound DM.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to capture inbound DM.',
+      })
+    }
+  }
+
   const handleRunLiveTest = async () => {
     const payload = JSON.stringify(activePayload, null, 2)
     try {
@@ -854,107 +1672,349 @@ function App() {
         payload,
       })
       applySnapshot(response.snapshot)
+      markRuntimeReady()
       setWebhookInput(payload)
       setWebhookResult({
         status: response.ok ? 'accepted' : 'rejected',
         message: response.message,
       })
       return
-    } catch {
-      // Fall back to local live-test logging when the API is unavailable.
-    }
-
-    const result = validateWebhookPayload(payload)
-    if (!result.ok) {
+    } catch (error) {
+      handleRuntimeFailure(error, 'Live test execution failed.')
       setWebhookResult({
         status: 'rejected',
-        message: result.message,
+        message: error instanceof Error ? error.message : 'Live test execution failed.',
       })
       return
     }
+  }
 
-    const route =
-      typeof result.parsed.event_name === 'string' && result.parsed.event_name.toLowerCase() === 'purchase'
-        ? {
-            connector: 'Meta CAPI',
-            label: 'Purchase',
-            note: 'Purchase payload normalized and staged for server-side relay.',
-            status: 'queued' as const,
-          }
-        : Array.isArray(result.parsed.onboarding_assets)
-          ? {
-              connector: 'Make',
-              label: 'OnboardingAutopilot',
-              note: 'Onboarding autopilot payload routed to the asset provisioning lane.',
-              status: 'queued' as const,
-            }
-          : typeof result.parsed.booking_status === 'string' || typeof result.parsed.route === 'string'
-            ? {
-                connector: 'GHL',
-                label: String(result.parsed.booking_status ?? result.parsed.route),
-                note: 'Consult routing update queued for the ops relay.',
-                status: 'processing' as const,
-              }
-            : {
-                connector: 'Zapier',
-                label: String(result.parsed.event_name ?? 'CustomEvent'),
-                note: 'Custom automation payload routed through the default relay lane.',
-                status: 'queued' as const,
-              }
+  const handleLoadProofPreview = async (target: 'slack' | 'sheets') => {
+    setRecipePending(target)
+    try {
+      const payload = target === 'slack' ? await fetchSlackExportPreview() : await fetchSheetsExportPreview()
+      setProofPreview({
+        title: target === 'slack' ? 'Slack export preview' : 'Google Sheets export preview',
+        payload: JSON.stringify(payload, null, 2),
+      })
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to load the export preview.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to load the export preview.',
+      })
+    } finally {
+      setRecipePending(null)
+    }
+  }
 
-    const timestamp = new Date().toISOString()
-    setLiveTestRuns((current) => [
-      {
-        id: `ltr-${String(current.length + 1).padStart(3, '0')}`,
-        scenarioId: activeScenario.id,
-        scenarioTitle: activeScenario.title,
-        stepLabel: runtime.stepLabels[stepIndex],
-        payloadLabel: route.label,
-        connector: route.connector,
-        status: 'accepted',
-        resultMessage: `${route.connector} accepted the live test payload and queued ${route.label}.`,
+  const handleRunRecipe = async (recipeId: string) => {
+    setRecipePending(recipeId)
+    try {
+      if (recipeId === 'dm-sprint') {
+        const handle = (activeLead?.handle || intakeHandle || '@demoautomation').trim()
+        const response = await runDmIntakeRequest({
+          handle: handle.startsWith('@') ? handle : `@${handle}`,
+          name: activeLead?.name,
+          source: activeLead?.source || intakeSource,
+          offer: activeLead?.offer || intakeOffer,
+          budget: activeLead?.budget,
+          message: activeConversation?.messages[0]?.text || intakeMessage || 'price for the sprint?',
+        })
+        if (response.snapshot) {
+          applySnapshot(response.snapshot)
+        }
+        const refreshedQueue = await fetchQueue()
+        setQueueRecords(refreshedQueue)
+        const matchedLead = refreshedQueue.find((entry) => entry.handle === (handle.startsWith('@') ? handle : `@${handle}`))
+        if (matchedLead) {
+          setSelectedLeadId(matchedLead.id)
+          setScenarioId(inferScenarioIdFromStage(matchedLead.stage))
+        }
+        setWebhookResult({
+          status: 'accepted',
+          message: response.message ?? 'DM sprint workflow executed.',
+        })
+      }
+
+      if (recipeId === 'ghl-recovery' && activeLead) {
+        const response = await runBookingUpdateRequest({
+          handle: activeLead.handle,
+          status: 'no-show',
+          slot: activeBooking?.slot ?? '2026-04-05T15:00:00Z',
+        })
+        if (response.snapshot) {
+          applySnapshot(response.snapshot)
+        }
+        setWebhookResult({
+          status: 'accepted',
+          message: response.message ?? 'No-show recovery workflow executed.',
+        })
+      }
+
+      if (recipeId === 'stripe-capi' && activeLead) {
+        const response = await runStripePaymentRequest({
+          handle: activeLead.handle,
+          amount: parseMoneyValue(activeLead.budget) || 49,
+          offer: activeLead.offer,
+        })
+        if (response.snapshot) {
+          applySnapshot(response.snapshot)
+        }
+        setWebhookResult({
+          status: 'accepted',
+          message: response.message ?? 'Stripe to Meta CAPI workflow executed.',
+        })
+      }
+
+      if (recipeId === 'onboarding' && activeLead) {
+        const response = await runOnboardingProvisionRequest({ handle: activeLead.handle })
+        if (response.snapshot) {
+          applySnapshot(response.snapshot)
+        }
+        setWebhookResult({
+          status: 'accepted',
+          message: response.message ?? 'Onboarding autopilot executed.',
+        })
+      }
+
+      markRuntimeReady()
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to execute the selected proof recipe.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to execute the selected proof recipe.',
+      })
+    } finally {
+      setRecipePending(null)
+    }
+  }
+
+  const handleDispatchExport = async (target: 'slack' | 'sheets') => {
+    setDispatchPending(target)
+    try {
+      const result = target === 'slack' ? await sendSlackExport() : await sendSheetsExport()
+      setWebhookResult({
+        status: result.ok ? 'accepted' : 'rejected',
+        message:
+          result.ok
+            ? `${target === 'slack' ? 'Slack' : 'Google Sheets'} export dispatched successfully.`
+            : `${target === 'slack' ? 'Slack' : 'Google Sheets'} export failed with status ${result.status}.`,
+      })
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to dispatch the export.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to dispatch the export.',
+      })
+    } finally {
+      setDispatchPending(null)
+    }
+  }
+
+  const refreshSyncState = useCallback(async () => {
+    setSyncPending('status')
+    try {
+      const status = await fetchSyncStatus()
+      setSyncStatus(status)
+      if (status.configured && !('error' in status.remote) && status.remote.found) {
+        setSyncPending('diff')
+        try {
+          const diff = await fetchSyncDiff()
+          setSyncDiff(diff)
+        } catch {
+          setSyncDiff(null)
+        }
+      } else {
+        setSyncDiff(null)
+      }
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to load sync status.')
+    } finally {
+      setSyncPending(null)
+    }
+  }, [handleRuntimeFailure])
+
+  const handleSyncPush = async () => {
+    setSyncPending('push')
+    try {
+      const result = await pushSync()
+      setWebhookResult({
+        status: result.ok ? 'accepted' : 'rejected',
+        message: result.ok
+          ? result.message ?? 'Local snapshot pushed to the remote mirror.'
+          : result.message ?? 'Local snapshot push failed.',
+      })
+      await refreshSyncState()
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to push sync state.')
+    } finally {
+      setSyncPending(null)
+    }
+  }
+
+  const handleSyncPull = async () => {
+    setSyncPending('pull')
+    try {
+      const result = await pullSync()
+      if (result.snapshot) {
+        applySnapshot(result.snapshot as never)
+      }
+      setWebhookResult({
+        status: result.ok ? 'accepted' : 'rejected',
+        message: result.message ?? 'Remote snapshot pulled into the local runtime.',
+      })
+      await refreshSyncState()
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to pull sync state.')
+    } finally {
+      setSyncPending(null)
+    }
+  }
+
+  const handleSyncReconcile = async () => {
+    setSyncPending('reconcile')
+    try {
+      const result = await reconcileSync('merge-prefer-local')
+      if (result.snapshot) {
+        applySnapshot(result.snapshot as never)
+      }
+      setWebhookResult({
+        status: result.ok ? 'accepted' : 'rejected',
+        message: result.message ?? 'Reconciled local state against the remote snapshot.',
+      })
+      await refreshSyncState()
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to reconcile sync state.')
+    } finally {
+      setSyncPending(null)
+    }
+  }
+
+  const handleBuildToolArtifact = async (templateId: string) => {
+    setToolPending(templateId)
+    try {
+      const template = toolTemplates.find((entry) => entry.id === templateId)
+      if (!template) {
+        return
+      }
+
+      const leadName = activeLead?.name ?? 'Active lead unavailable'
+      const leadHandle = activeLead?.handle ?? '@demoautomation'
+      const queueTotal = reportsOverview?.queueSummary.total ?? queueRecords.length
+      const recoveryCount = reportsOverview?.queueSummary.recovery ?? queueRecords.filter((entry) => entry.lane === 'recovery').length
+      const failedCount = reportsOverview?.outboxSummary.failed ?? failedDeliveries.length
+      const revenueValue = missionStats.find((metric) => metric.label === 'Stripe Revenue')?.value ?? '$0'
+
+      let payload = ''
+
+      if (templateId === 'proof-pack') {
+        payload = [
+          `Proof pack: ${activeScenario.title}`,
+          `Lead: ${leadName} (${leadHandle})`,
+          `Source: ${activeLead?.source ?? 'unknown'}`,
+          `Offer: ${activeLead?.offer ?? 'unknown'}`,
+          `Queue pressure: ${queueTotal} total / ${recoveryCount} recovery`,
+          `Revenue snapshot: ${revenueValue}`,
+          `Connector backlog: ${reportsOverview?.outboxSummary.queued ?? 0} queued / ${failedCount} failed`,
+          'Next step: show the live queue, then replay the supporting workflow once.',
+        ].join('\n')
+      } else if (templateId === 'sop-handoff') {
+        payload = [
+          `SOP handoff: ${template.title}`,
+          `Scenario: ${activeScenario.title}`,
+          `Current lead: ${leadName} (${leadHandle})`,
+          `Working stage: ${activeLead?.stage ?? 'unknown'}`,
+          '1. Inspect the active lead and route.',
+          '2. Check the delivery outbox for retries or stuck relays.',
+          '3. Review the connector row and ping anything that is attention-needed.',
+          '4. Export the proof pack if you need a handoff artifact.',
+        ].join('\n')
+      } else {
+        const failedLines = failedDeliveries.length
+          ? failedDeliveries.map((item) => `${item.connector}: ${item.payloadLabel} (${item.note})`)
+          : ['No failed deliveries in the current outbox snapshot.']
+
+        const attentionLines = attentionConnectors.length
+          ? attentionConnectors.map((entry) => `${entry.name}: ${entry.status} • ${entry.note}`)
+          : ['No attention-needed connectors in the current snapshot.']
+
+        payload = [
+          `Failure triage: ${activeScenario.title}`,
+          ...failedLines,
+          ...attentionLines,
+          `Runtime status: ${runtimeStatus}`,
+          `Recovery count: ${recoveryCount}`,
+          'Next step: retry the first failed relay or ping the connector that needs attention.',
+        ].join('\n')
+      }
+
+      setToolArtifact({
+        title: template.title,
         payload,
-        createdAt: timestamp,
-      },
-      ...current,
-    ])
-    setDeliveryQueue((current) => [
-      {
-        id: `dq-${String(current.length + 1).padStart(3, '0')}`,
-        connector: route.connector,
-        channel:
-          route.connector === 'Meta CAPI'
-            ? 'server_events'
-            : route.connector === 'GHL'
-              ? 'consult_routing'
-              : route.connector === 'Make'
-                ? 'onboarding'
-                : 'automation_relay',
-        target: `scenario:${activeScenario.id}`,
-        payloadLabel: route.label,
-        status: route.status,
-        lastAttempt: timestamp,
-        note: route.note,
-      },
-      ...current,
-    ])
-    updateConnectorState(route.connector, {
-      status: 'syncing',
-      lastPing: timestamp,
-      runs: (connectorStates[route.connector]?.runs ?? 0) + 1,
-      note: `${route.connector} accepted a live test run from the scenario tester.`,
-    })
-    appendAuditEvent({
-      kind: 'scenario',
-      title: 'Live test run completed',
-      detail: `${route.connector} accepted ${route.label} and queued the relay item.`,
-      target: activeScenario.id,
-    })
-    setWebhookInput(payload)
-    setWebhookResult({
-      status: 'accepted',
-      message: `${route.connector} accepted the live test payload and queued ${route.label}.`,
-    })
+      })
+      setWebhookResult({
+        status: 'accepted',
+        message: `${template.title} generated from live state.`,
+      })
+      return
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to build the internal tool artifact.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to build the internal tool artifact.',
+      })
+      return
+    } finally {
+      setToolPending(null)
+    }
+  }
+
+  const handleCopyToolArtifact = async () => {
+    if (!toolArtifact) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(toolArtifact.payload)
+      setWebhookResult({
+        status: 'accepted',
+        message: `${toolArtifact.title} copied to clipboard.`,
+      })
+    } catch {
+      setWebhookResult({
+        status: 'rejected',
+        message: 'Clipboard copy failed. Use the visible artifact text instead.',
+      })
+    }
+  }
+
+  const handleRuntimeReset = async () => {
+    setRuntimeResetPending(true)
+    try {
+      const snapshot = await resetRuntimeState()
+      applySnapshot(snapshot as never)
+      const [nextQueue, nextReports] = await Promise.all([fetchQueue(), fetchReportsOverview()])
+      setQueueRecords(nextQueue)
+      setReportsOverview(nextReports)
+      setToolArtifact(null)
+      setSelectedLeadId(nextQueue[0]?.id ?? '')
+      setScenarioId(inferScenarioIdFromStage(nextQueue[0]?.stage))
+      setStepIndex(0)
+      setWebhookResult({
+        status: 'accepted',
+        message: 'Runtime reset to the seeded interview dataset.',
+      })
+      markRuntimeReady()
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to reset the runtime.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to reset the runtime.',
+      })
+    } finally {
+      setRuntimeResetPending(false)
+    }
   }
 
   const evaluateRule = (rule: RuleDraft): RuleTestResult => {
@@ -963,7 +2023,10 @@ function App() {
       return { status: 'skipped', detail: 'Rule disabled in the current simulator run.', timestamp }
     }
 
-    const transcript = activeConversation.messages.map((message) => message.text).join(' ').toLowerCase()
+    const transcript = (activeConversation?.messages ?? [])
+      .map((message) => message.text)
+      .join(' ')
+      .toLowerCase()
     const trigger = rule.trigger.toLowerCase()
 
     if (trigger.includes('keyword')) {
@@ -979,11 +2042,12 @@ function App() {
     }
 
     if (trigger.includes('intent')) {
-      const matched = activeConversation.intent === 'call' || activeConversation.intent === 'checkout'
+      const matched =
+        activeConversation?.intent === 'call' || activeConversation?.intent === 'checkout'
       return {
         status: matched ? 'pass' : 'fail',
         detail: matched
-          ? `Matched intent signal: ${activeConversation.intent}.`
+          ? `Matched intent signal: ${activeConversation?.intent}.`
           : 'Intent signal missing for this scenario.',
         timestamp,
       }
@@ -1033,25 +2097,16 @@ function App() {
     try {
       const response = await logNoteRequest(trimmed, activeScenario.id, runtime.stepLabels[stepIndex])
       applySnapshot(response.snapshot)
+      markRuntimeReady()
       return
-    } catch {
-      // Fall back to local note logging when the API is unavailable.
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to log the operator note.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to log the operator note.',
+      })
+      return
     }
-
-    const entry: OperatorNote = {
-      id: `note-${String(operatorNotesHistory.length + 1).padStart(3, '0')}`,
-      note: trimmed,
-      timestamp: new Date().toISOString(),
-      scenarioId: activeScenario.id,
-      stepLabel: runtime.stepLabels[stepIndex],
-    }
-    setOperatorNotesHistory((current) => [entry, ...current])
-    appendAuditEvent({
-      kind: 'note',
-      title: 'Operator note logged',
-      detail: trimmed,
-      target: activeScenario.id,
-    })
   }
 
   const handleLeadAction = async (
@@ -1066,181 +2121,40 @@ function App() {
     try {
       const response = await runLeadAction(leadId, action)
       applySnapshot(response.snapshot)
+      markRuntimeReady()
+      setWebhookResult({
+        status: 'accepted',
+        message: response.message ?? `Executed ${action} action for ${lead.handle}.`,
+      })
       return
-    } catch {
-      // Fall back to local state mutations when the API is unavailable.
-    }
-
-    if (action === 'checkout') {
-      const nextTags = lead.tags.includes('checkout-live')
-        ? lead.tags
-        : [...lead.tags, 'checkout-live']
-      updateLeadRecord(leadId, {
-        stage: 'checkout-sent',
-        tags: nextTags,
-        nextAction: 'Checkout link sent; urgency bump queued at +2h.',
-        lastTouch: 'just now',
-      })
-      addDeliveryItem({
-        connector: 'Stripe',
-        channel: 'checkout_handoff',
-        target: lead.handle,
-        payloadLabel: 'InitiateCheckout',
-        status: 'queued',
-        lastAttempt: new Date().toISOString(),
-        note: 'Generated checkout handoff from the ops queue.',
-      })
-      appendAuditEvent({
-        kind: 'scenario',
-        title: 'Checkout queued',
-        detail: `Promoted ${lead.handle} into checkout-sent and queued a Stripe handoff.`,
-        target: leadId,
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to run the selected lead action.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to run the selected lead action.',
       })
       return
     }
-
-    if (action === 'route') {
-      updateLeadRecord(leadId, {
-        owner: 'Nina',
-        stage: 'booked',
-        nextAction: 'Closer assigned; reminders and call prep started.',
-        lastTouch: 'just now',
-      })
-      if (activeBooking) {
-        updateBookingRecord(activeBooking.id, {
-          owner: 'Nina',
-          status: 'booked',
-          recoveryAction: 'Consult booked and reminder sequence started.',
-        })
-      }
-      addDeliveryItem({
-        connector: 'GHL',
-        channel: 'consult_routing',
-        target: lead.handle,
-        payloadLabel: 'BookingCreated',
-        status: 'processing',
-        lastAttempt: new Date().toISOString(),
-        note: 'Lead assigned to closer and routed into booking flow.',
-      })
-      appendAuditEvent({
-        kind: 'scenario',
-        title: 'Closer assigned',
-        detail: `Routed ${lead.handle} to Nina and kicked off the consult branch.`,
-        target: leadId,
-      })
-      return
-    }
-
-    if (action === 'no-show') {
-      const nextTags = lead.tags.includes('no-show') ? lead.tags : [...lead.tags, 'no-show']
-      updateLeadRecord(leadId, {
-        stage: 'no-show',
-        tags: nextTags,
-        nextAction: 'Recovery branch queued with proof stack and reschedule link.',
-        lastTouch: 'just now',
-      })
-      if (activeBooking) {
-        updateBookingRecord(activeBooking.id, {
-          status: 'no-show',
-          recoveryAction: 'Marked no-show and moved into recovery automation.',
-        })
-      }
-      addDeliveryItem({
-        connector: 'Make',
-        channel: 'recovery_sequence',
-        target: lead.handle,
-        payloadLabel: 'NoShowRecovery',
-        status: 'queued',
-        lastAttempt: new Date().toISOString(),
-        note: 'Recovery workflow staged after missed consult attendance.',
-      })
-      appendAuditEvent({
-        kind: 'scenario',
-        title: 'No-show escalated',
-        detail: `Moved ${lead.handle} into no-show recovery and queued the sequence.`,
-        target: leadId,
-      })
-      return
-    }
-
-    if (action === 'recover') {
-      updateLeadRecord(leadId, {
-        stage: 'recovery',
-        nextAction: 'Recovered; waiting on rebook confirmation.',
-        lastTouch: 'just now',
-      })
-      if (activeBooking) {
-        updateBookingRecord(activeBooking.id, {
-          status: 'recovered',
-          recoveryAction: 'Recovered with proof stack and one-click rebook.',
-        })
-      }
-      addDeliveryItem({
-        connector: 'Meta CAPI',
-        channel: 'server_events',
-        target: lead.handle,
-        payloadLabel: 'Schedule',
-        status: 'queued',
-        lastAttempt: new Date().toISOString(),
-        note: 'Recovered consult status prepared for server-side reporting.',
-      })
-      appendAuditEvent({
-        kind: 'scenario',
-        title: 'Lead recovered',
-        detail: `Recovered ${lead.handle} and prepared reporting payloads for the new booking path.`,
-        target: leadId,
-      })
-      return
-    }
-
-    addDeliveryItem({
-      connector: 'Slack',
-      channel: 'team_alert',
-      target: lead.handle,
-      payloadLabel: 'HotLeadAlert',
-      status: 'delivered',
-      lastAttempt: new Date().toISOString(),
-      note: 'Hot lead alert sent to the team for manual assist.',
-    })
-    appendAuditEvent({
-      kind: 'connector',
-      title: 'Slack alert sent',
-      detail: `Pushed a manual assist alert for ${lead.handle}.`,
-      target: leadId,
-    })
   }
 
   const handleDeliveryRetry = async (deliveryId: string) => {
     try {
       const response = await retryDeliveryRequest(deliveryId)
       applySnapshot(response.snapshot)
+      markRuntimeReady()
       return
-    } catch {
-      // Fall back to local retry when the API is unavailable.
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to retry the delivery item.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to retry the delivery item.',
+      })
+      return
     }
-
-    setDeliveryQueue((current) =>
-      current.map((item) =>
-        item.id === deliveryId
-          ? {
-              ...item,
-              status: 'delivered',
-              lastAttempt: new Date().toISOString(),
-              note: `${item.connector} retried successfully from the outbox.`,
-            }
-          : item,
-      ),
-    )
-    appendAuditEvent({
-      kind: 'connector',
-      title: 'Delivery retried',
-      detail: `Outbox item ${deliveryId} was retried and marked delivered.`,
-      target: deliveryId,
-    })
   }
 
   const handleConnectorPing = async (connectorName: string) => {
-    const current = connectorStates[connectorName] ?? defaultConnectorStates[connectorName]
+    const current = connectorStates[connectorName]
     if (!current) {
       return
     }
@@ -1248,43 +2162,84 @@ function App() {
     try {
       const response = await pingConnectorRequest(connectorName)
       applySnapshot(response.snapshot)
+      markRuntimeReady()
       return
-    } catch {
-      // Fall back to local connector updates when the API is unavailable.
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to ping the connector.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to ping the connector.',
+      })
+      return
     }
+  }
 
-    const nextStatus: ConnectorStatus = 'ready'
-    const timestamp = new Date().toISOString()
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setAuthPending(true)
+    setApiError(null)
 
-    updateConnectorState(connectorName, {
-      status: nextStatus,
-      lastPing: timestamp,
-      runs: current.runs + 1,
-      note: `${connectorName} checked, payload routing is healthy.`,
-    })
-    appendAuditEvent({
-      kind: 'connector',
-      title: `${connectorName} pinged`,
-      detail: 'Connector health check completed and the relay path is ready.',
-      target: connectorName,
-    })
+    try {
+      await loginAdmin(loginUsername.trim(), loginPassword)
+      const session = await fetchAdminSession()
+      setAuthSession(session.session)
+      setAuthStatus('authenticated')
+      setRuntimeStatus('loading')
+      setLoginPassword('')
+    } catch (error) {
+      clearLiveConsoleState()
+      setAuthSession(null)
+      setAuthStatus('auth_required')
+      setApiError(error instanceof Error ? error.message : 'Login failed.')
+    } finally {
+      setAuthPending(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logoutAdmin()
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Logout failed.')
+    } finally {
+      clearLiveConsoleState()
+      setAuthSession(null)
+      setAuthStatus('auth_required')
+      setLoginPassword('')
+    }
+  }
+
+  const handleOauthLogin = async (provider: 'google' | 'github') => {
+    setOauthProviderPending(provider)
+    setApiError(null)
+
+    try {
+      const { authorizeUrl } = await fetchOauthAuthorizeUrl(provider, window.location.origin)
+      const authWindow = window.open(authorizeUrl, '_blank', 'noopener,noreferrer')
+      if (!authWindow) {
+        window.location.assign(authorizeUrl)
+      }
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Unable to start OAuth login.')
+      setOauthProviderPending(null)
+    }
   }
 
   const handleExport = () => {
     const payload = {
       exportedAt: new Date().toISOString(),
-      scenario: activeScenario.title,
+      scenario: activeLead?.name ? `${activeLead.name} workflow` : activeScenario.title,
       step: runtime.stepLabels[stepIndex],
       stepIndex,
       lead: activeLead,
       conversation: {
-        id: activeConversation.id,
-        intent: activeConversation.intent,
-        score: activeConversation.score,
+        id: activeConversation?.id ?? null,
+        intent: activeConversation?.intent ?? null,
+        score: activeConversation?.score ?? null,
         transcript: visibleMessages,
       },
       bookingStatus: runtime.bookingStatuses[stepIndex],
-      visibleEvents: scenarioEvents,
+      visibleEvents: activeAutomationTrail,
       webhookPayload: activePayload,
       notes: operatorNotes,
       notesHistory: operatorNotesHistory,
@@ -1298,16 +2253,157 @@ function App() {
       auditEvents,
       liveTestRuns,
       metrics: railMetrics,
-      capiEvents,
+      capiEvents: capiRailEvents,
+      syncStatus,
+      syncDiff,
     }
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${activeScenario.id}-proof.json`
+    link.download = `${activeLead?.id ?? activeScenario.id}-proof.json`
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  if (authStatus !== 'authenticated') {
+    return (
+      <div className="console-shell console-shell-auth">
+        <section className="auth-layout">
+          <div className="auth-shell">
+            <div className="auth-panel auth-panel-overview">
+              <div className="auth-brand">
+                <div className="auth-brand-copy">
+                  <div className="auth-brand-title">COBE Operator Console</div>
+                  <p className="auth-brand-subtitle">Creator funnel operations</p>
+                </div>
+              </div>
+
+              <div className="auth-overview-copy">
+                <h1>Live queue, workflow routing, and relay visibility.</h1>
+                <p>
+                  The console runs DM intake, booking updates, payment events, recovery actions, and downstream
+                  delivery from the same backend.
+                </p>
+              </div>
+
+              <section className="auth-overview-summary" aria-label="Console summary">
+                <div className="auth-overview-summary-item">
+                  <strong>Queue</strong>
+                  <span>Prioritized leads, owner context, and next action.</span>
+                </div>
+                <div className="auth-overview-summary-item">
+                  <strong>Workflows</strong>
+                  <span>DM intake, booking updates, payment handoff, onboarding.</span>
+                </div>
+                <div className="auth-overview-summary-item">
+                  <strong>Relays</strong>
+                  <span>Meta CAPI, GHL, Stripe, Slack, and retryable outbox state.</span>
+                </div>
+              </section>
+
+              <div className="auth-visual">
+                <div className="auth-visual-glow auth-visual-glow-a" />
+                <div className="auth-visual-glow auth-visual-glow-b" />
+                <div className="auth-visual-screen">
+                  <div className="auth-visual-screen-top">
+                    <strong>Today</strong>
+                    <span>Live operator runtime</span>
+                  </div>
+                  <div className="auth-visual-grid">
+                    <div className="auth-visual-tile auth-visual-tile-large">
+                      <span className="auth-visual-label">Queue</span>
+                      <strong>{queueRecords.length || 3}</strong>
+                      <p>Prioritized leads waiting for action.</p>
+                    </div>
+                    <div className="auth-visual-tile">
+                      <span className="auth-visual-label">Relays</span>
+                      <strong>{deliveryQueue.length || 4}</strong>
+                      <p>Meta CAPI, Stripe, GHL, Slack.</p>
+                    </div>
+                    <div className="auth-visual-tile">
+                      <span className="auth-visual-label">Runs</span>
+                      <strong>{liveTestRuns.length || 0}</strong>
+                      <p>Stored workflow test results.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="auth-panel auth-panel-form">
+              {authStatus === 'checking' ? (
+                <div className="auth-state">
+                  <h2>Checking session</h2>
+                  <p>The app is waiting on the backend session check.</p>
+                </div>
+              ) : (
+                <form className="auth-form" onSubmit={handleLogin}>
+                  <div className="auth-heading">
+                    <h2>Sign in</h2>
+                    <p>Use a provider or operator credentials.</p>
+                  </div>
+
+                  <div className="auth-providers">
+                    <button
+                      type="button"
+                      className="auth-provider-button"
+                      disabled={authPending}
+                      onClick={() => handleOauthLogin('google')}
+                    >
+                      <ProviderIcon provider="google" />
+                      <span>{oauthProviderPending === 'google' ? 'Opening Google…' : 'Continue with Google'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="auth-provider-button"
+                      disabled={authPending}
+                      onClick={() => handleOauthLogin('github')}
+                    >
+                      <ProviderIcon provider="github" />
+                      <span>{oauthProviderPending === 'github' ? 'Opening GitHub…' : 'Continue with GitHub'}</span>
+                    </button>
+                  </div>
+
+                  <div className="auth-divider auth-divider-tight">
+                    <span>or use operator login</span>
+                  </div>
+
+                  <label className="auth-field">
+                    <span>Username</span>
+                    <input
+                      className="auth-input"
+                      type="text"
+                      value={loginUsername}
+                      onChange={(event) => setLoginUsername(event.target.value)}
+                      autoComplete="username"
+                    />
+                  </label>
+
+                  <label className="auth-field">
+                    <span>Password</span>
+                    <input
+                      className="auth-input"
+                      type="password"
+                      value={loginPassword}
+                      onChange={(event) => setLoginPassword(event.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </label>
+
+                  <button type="submit" className="auth-submit-button" disabled={authPending}>
+                    {authPending ? 'Signing in…' : 'Sign in'}
+                  </button>
+
+                  {apiError ? <p className="runtime-banner runtime-banner-auth_required">{apiError}</p> : null}
+                </form>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    )
   }
 
   return (
@@ -1359,13 +2455,33 @@ function App() {
             >
               Reset
             </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleRuntimeReset}
+              disabled={runtimeResetPending || authStatus !== 'authenticated'}
+            >
+              {runtimeResetPending ? 'Resetting data…' : 'Reset data'}
+            </button>
           </div>
 
           <div className="command-cluster">
+            <span className="status-pill">
+              {authSession?.bypass ? 'local bypass' : authSession?.sub ?? 'authenticated'}
+            </span>
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={handleRunWorkflow}
+              disabled={!hasLiveLead || !liveConsoleReady}
+            >
+              Run workflow
+            </button>
             <button
               type="button"
               className="button button-warning button-small"
               onClick={handleRunLiveTest}
+              disabled={!liveConsoleReady}
             >
               Run live test
             </button>
@@ -1380,10 +2496,37 @@ function App() {
               type="button"
               className="button button-secondary button-small"
               onClick={handleLogNote}
+              disabled={!liveConsoleReady}
             >
               Log note
             </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
           </div>
+        </div>
+
+        {apiError ? (
+          <div className={`runtime-banner runtime-banner-${runtimeStatus === 'degraded' ? 'degraded' : 'auth_required'}`}>
+            <strong>{runtimeStatus === 'degraded' ? 'Degraded runtime' : 'Session required'}</strong>
+            <span>{apiError}</span>
+          </div>
+        ) : null}
+        <div className="runtime-banner">
+          <strong>Runtime status</strong>
+          <span>
+            {runtimeStatus === 'ready'
+              ? 'Live backend connected.'
+              : runtimeStatus === 'loading'
+                ? 'Loading queue, workflow shell, reports, and rail state from the backend.'
+                : runtimeStatus === 'degraded'
+                  ? 'Live reads failed. The console shell is intentionally withholding seeded fallback data.'
+                  : 'Waiting for an authenticated live runtime.'}
+          </span>
         </div>
       </header>
 
@@ -1421,18 +2564,73 @@ function App() {
             </select>
           </div>
 
+          <div className="queue-intake-block">
+            <div className="section-topline">
+              <div>
+                <p className="mini-label">DM intake</p>
+                <h3>Capture inbound lead</h3>
+              </div>
+              <span className="timeline-meta">IG / story / comment / form</span>
+            </div>
+
+            <div className="filters">
+            <input
+              className="audit-search"
+              type="text"
+              value={intakeHandle}
+              onChange={(event) => setIntakeHandle(event.target.value)}
+              placeholder="@handle"
+            />
+            <select
+              className="audit-select"
+              value={intakeSource}
+              onChange={(event) => setIntakeSource(event.target.value)}
+            >
+              <option value="instagram_dm">Instagram DM</option>
+              <option value="story_reply">Story reply</option>
+              <option value="lead_form">Lead form</option>
+              <option value="ig_comment_keyword">IG comment keyword</option>
+            </select>
+            <input
+              className="audit-search"
+              type="text"
+              value={intakeOffer}
+              onChange={(event) => setIntakeOffer(event.target.value)}
+              placeholder="Offer"
+            />
+            <textarea
+              className="notes-editor queue-intake-editor"
+              value={intakeMessage}
+              onChange={(event) => setIntakeMessage(event.target.value)}
+              placeholder="Inbound DM or comment text"
+            />
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={handleCaptureLead}
+            >
+              Capture DM
+            </button>
+            </div>
+          </div>
+
           <div className="lead-queue">
+            {prioritizedLeads.length === 0 ? (
+              <div className="queue-empty-state">
+                <p className="mini-label">
+                  {runtimeStatus === 'degraded' ? 'Live queue unavailable' : 'No matching leads'}
+                </p>
+                <p className="queue-item-note">
+                  {runtimeStatus === 'degraded'
+                    ? 'Queue data is hidden until the backend can load it again.'
+                    : 'Adjust the search or stage filter to bring leads back into the active queue.'}
+                </p>
+              </div>
+            ) : null}
+
             {prioritizedLeads.map((lead) => {
-              const scenarioForLead = leadScenarios[lead.id]
-              const isActive = lead.id === activeLead.id
-              const priorityLabel =
-                lead.stage === 'no-show'
-                  ? 'critical'
-                  : lead.stage === 'checkout-sent'
-                    ? 'hot'
-                    : lead.stage === 'booked'
-                      ? 'watch'
-                      : 'normal'
+              const isActive = lead.id === activeLead?.id
+              const priorityLabel = lead.priorityBand
 
               return (
                 <button
@@ -1440,9 +2638,10 @@ function App() {
                   type="button"
                   className={`queue-item ${isActive ? 'queue-item-active' : ''}`}
                   onClick={() => {
-                    if (scenarioForLead) {
-                      handleScenarioChange(scenarioForLead)
-                    }
+                    setSelectedLeadId(lead.id)
+                    setScenarioId(inferScenarioIdFromStage(lead.stage))
+                    setStepIndex(0)
+                    setWebhookResult(null)
                   }}
                 >
                   <div className="queue-item-topline">
@@ -1455,7 +2654,7 @@ function App() {
                   <p className="timeline-meta">
                     {lead.handle} • {lead.offer} • {lead.stage}
                   </p>
-                  <p className="queue-item-note">{lead.nextAction}</p>
+                  <p className="queue-item-note">{lead.recommendedAction}</p>
                 </button>
               )
             })}
@@ -1463,28 +2662,48 @@ function App() {
         </aside>
 
         <section className="console-panel workspace-panel">
+          {!hasLiveLead ? (
+            <div className="queue-empty-state">
+              <p className="mini-label">
+                {runtimeStatus === 'degraded' ? 'Workflow shell degraded' : 'No live lead selected'}
+              </p>
+              <p className="queue-item-note">
+                {runtimeStatus === 'degraded'
+                  ? 'The authenticated workflow shell is waiting for a successful backend refresh.'
+                  : 'Load a lead from the live queue to inspect the workflow shell.'}
+              </p>
+            </div>
+          ) : null}
+
           <div className="workspace-header">
             <div className="workspace-title">
               <p className="panel-kicker">Active workflow</p>
-              <h2>{activeScenario.title}</h2>
-              <p className="stat-note">{activeScenario.outcome}</p>
+              <h2>{activeLead?.name ? `${activeLead.name} workflow` : activeScenario.title}</h2>
+              <p className="stat-note">
+                {activeLead?.nextAction ??
+                  'No live workflow state is available until the backend returns an authenticated queue record.'}
+              </p>
             </div>
 
             <div className="workspace-status">
               <div className="status-block status-block-cyan">
                 <p className="mini-label">Current step</p>
                 <strong>{runtime.stepLabels[stepIndex]}</strong>
-                <p>{activeScenario.steps[stepIndex]}</p>
+                <p>{activeLeadQueue[0]?.note ?? activeScenario.steps[stepIndex]}</p>
               </div>
               <div className="status-block status-block-amber">
                 <p className="mini-label">{runtime.metricLabel}</p>
                 <strong>{activeMetricValue}</strong>
-                <p>{activeScenario.revenueAngle}</p>
+                <p>{activeLeadQueue[0]?.payloadLabel ?? activeScenario.revenueAngle}</p>
               </div>
               <div className="status-block status-block-green">
                 <p className="mini-label">Operator target</p>
-                <strong>{activeLead.handle}</strong>
-                <p>{activeLead.nextAction}</p>
+                <strong>{activeLead?.handle ?? 'No live lead loaded'}</strong>
+                <p>
+                  {activeLeadQueue[0]?.note ??
+                    activeLead?.nextAction ??
+                    'Actions stay disabled until the backend provides a live workflow target.'}
+                </p>
               </div>
             </div>
 
@@ -1493,12 +2712,27 @@ function App() {
                 <span className="status-pill">
                   Step {stepIndex + 1}/{runtime.stepLabels.length}
                 </span>
-                <span className="timeline-meta">{activeScenario.hoursSaved} reclaimed</span>
+                <span className="timeline-meta">
+                  {activeLeadQueue.length ? `${activeLeadQueue.length} live relays` : `${activeScenario.hoursSaved} reclaimed`}
+                </span>
               </div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${progress}%` }} />
               </div>
             </div>
+
+            {webhookResult ? (
+              <div
+                className={`runtime-banner ${
+                  webhookResult.status === 'accepted'
+                    ? 'runtime-banner-success'
+                    : 'runtime-banner-auth_required'
+                }`}
+              >
+                <strong>{webhookResult.status === 'accepted' ? 'Latest result' : 'Action failed'}</strong>
+                <span>{webhookResult.message}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="workspace-tabs">
@@ -1524,9 +2758,11 @@ function App() {
                 <div className="section-topline">
                   <div>
                     <p className="mini-label">Live transcript</p>
-                    <h3>{activeLead.name}</h3>
+                    <h3>{activeLead?.name ?? 'No live conversation loaded'}</h3>
                   </div>
-                  <div className="score-badge">{activeConversation.score} intent score</div>
+                  <div className="score-badge">
+                    {activeConversation ? `${activeConversation.score} intent score` : 'Live data required'}
+                  </div>
                 </div>
 
                 <div className="message-stack">
@@ -1541,11 +2777,19 @@ function App() {
                       <small>{message.timestamp}</small>
                     </div>
                   ))}
+                  {visibleMessages.length === 0 ? (
+                    <p className="timeline-meta">
+                      The console is not replaying seeded DM history while live conversation data is unavailable.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="event-summary">
                   <p className="mini-label">Automation result</p>
-                  <p>{activeConversation.automationSummary}</p>
+                  <p>
+                    {activeConversation?.automationSummary ??
+                      'No live automation summary is available until the backend loads this workflow.'}
+                  </p>
                 </div>
               </section>
 
@@ -1554,7 +2798,7 @@ function App() {
                   <div className="section-topline">
                     <div>
                       <p className="mini-label">Lead profile</p>
-                      <h3>{activeLead.handle}</h3>
+                      <h3>{activeLead?.handle ?? 'No live target'}</h3>
                     </div>
                     <span className="stage-badge">{runtime.leadStages[stepIndex]}</span>
                   </div>
@@ -1562,32 +2806,32 @@ function App() {
                   <dl className="detail-grid">
                     <div>
                       <dt>Offer</dt>
-                      <dd>{activeLead.offer}</dd>
+                      <dd>{activeLead?.offer ?? 'Waiting for live data'}</dd>
                     </div>
                     <div>
                       <dt>Source</dt>
-                      <dd>{activeLead.source}</dd>
+                      <dd>{activeLead?.source ?? 'Waiting for live data'}</dd>
                     </div>
                     <div>
                       <dt>Owner</dt>
-                      <dd>{activeLead.owner}</dd>
+                      <dd>{activeLead?.owner ?? 'Waiting for live data'}</dd>
                     </div>
                     <div>
                       <dt>Budget</dt>
-                      <dd>{activeLead.budget}</dd>
+                      <dd>{activeLead?.budget ?? 'Waiting for live data'}</dd>
                     </div>
                     <div>
                       <dt>Last touch</dt>
-                      <dd>{activeLead.lastTouch}</dd>
+                      <dd>{activeLead?.lastTouch ?? 'Waiting for live data'}</dd>
                     </div>
                     <div>
                       <dt>Hours saved</dt>
-                      <dd>{activeScenario.hoursSaved}</dd>
+                      <dd>{activeLeadQueue.length ? `${activeLeadQueue.length} live relays` : activeScenario.hoursSaved}</dd>
                     </div>
                   </dl>
 
                   <div className="tag-row">
-                    {activeLead.tags.map((tag) => (
+                    {(activeLead?.tags ?? []).map((tag) => (
                       <span key={tag} className="tag">
                         {tag}
                       </span>
@@ -1606,35 +2850,40 @@ function App() {
                     <button
                       type="button"
                       className="button button-secondary button-small"
-                      onClick={() => handleLeadAction('checkout', activeLead.id)}
+                      onClick={() => activeLead && handleLeadAction('checkout', activeLead.id)}
+                      disabled={!hasLiveLead || !liveConsoleReady}
                     >
                       Queue checkout
                     </button>
                     <button
                       type="button"
                       className="button button-secondary button-small"
-                      onClick={() => handleLeadAction('route', activeLead.id)}
+                      onClick={() => activeLead && handleLeadAction('route', activeLead.id)}
+                      disabled={!hasLiveLead || !liveConsoleReady}
                     >
                       Route closer
                     </button>
                     <button
                       type="button"
                       className="button button-danger button-small"
-                      onClick={() => handleLeadAction('no-show', activeLead.id)}
+                      onClick={() => activeLead && handleLeadAction('no-show', activeLead.id)}
+                      disabled={!hasLiveLead || !liveConsoleReady}
                     >
                       Mark no-show
                     </button>
                     <button
                       type="button"
                       className="button button-warning button-small"
-                      onClick={() => handleLeadAction('recover', activeLead.id)}
+                      onClick={() => activeLead && handleLeadAction('recover', activeLead.id)}
+                      disabled={!hasLiveLead || !liveConsoleReady}
                     >
                       Recover lead
                     </button>
                     <button
                       type="button"
                       className="button button-primary button-small"
-                      onClick={() => handleLeadAction('alert', activeLead.id)}
+                      onClick={() => activeLead && handleLeadAction('alert', activeLead.id)}
+                      disabled={!hasLiveLead || !liveConsoleReady}
                     >
                       Send alert
                     </button>
@@ -1650,7 +2899,7 @@ function App() {
                 <div className="section-topline">
                   <div>
                     <p className="mini-label">Recovery state</p>
-                    <h3>{activeLead.name}</h3>
+                    <h3>{activeLead?.name ?? 'No live recovery state loaded'}</h3>
                     <p className="timeline-meta">{activeBooking?.slot ?? 'No call slot required'}</p>
                   </div>
                   <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
@@ -1658,7 +2907,7 @@ function App() {
                   </span>
                 </div>
 
-                <p className="booking-owner">Closer: {activeLead.owner}</p>
+                <p className="booking-owner">Closer: {activeLead?.owner ?? 'Unassigned'}</p>
                 <p className="booking-copy">
                   {activeBooking?.recoveryAction ??
                     'Payment path skips call handling and moves directly into onboarding automation.'}
@@ -1669,16 +2918,21 @@ function App() {
                     <article key={entry.id} className="timeline-card">
                       <div className="section-topline">
                         <div>
-                          <p className="event-name">{entry.event}</p>
+                          <p className="event-name">{entry.title}</p>
                           <p className="timeline-meta">
-                            {entry.channel} • {entry.timestamp}
+                            {entry.type} • {entry.timestamp}
                           </p>
                         </div>
-                        <span className={`event-status event-${entry.status}`}>{entry.status}</span>
+                        <span className={`event-status event-${entry.type}`}>{entry.type}</span>
                       </div>
                       <p>{entry.detail}</p>
                     </article>
                   ))}
+                  {activeLeadTimeline.length === 0 ? (
+                    <p className="timeline-meta">
+                      Timeline events remain empty until the backend returns an authenticated workflow history.
+                    </p>
+                  ) : null}
                 </div>
               </section>
 
@@ -1692,7 +2946,10 @@ function App() {
                     <span className="signal-badge signal-critical">ghl branch</span>
                   </div>
                   <ol className="scenario-steps">
-                    {activeScenario.steps.map((step) => (
+                    {(activeLeadTimeline.length
+                      ? activeLeadTimeline.slice(0, 4).map((entry) => entry.detail)
+                      : activeScenario.steps
+                    ).map((step) => (
                       <li key={step}>{step}</li>
                     ))}
                   </ol>
@@ -1706,9 +2963,9 @@ function App() {
                     </div>
                   </div>
                   <div className="tag-row">
-                    {scenarioEvents.map((entry) => (
-                      <span key={entry.id} className="tag">
-                        {entry.event}
+                    {activeAutomationTrail.map((entry) => (
+                      <span key={entry} className="tag">
+                        {entry}
                       </span>
                     ))}
                   </div>
@@ -1718,7 +2975,7 @@ function App() {
           ) : null}
 
           {workbenchTab === 'payload' ? (
-            <div className="stage-layout">
+            <div className="stage-layout stage-layout-payload">
               <section className="stage-panel stage-panel-primary">
                 <div className="section-topline">
                   <div>
@@ -1803,6 +3060,23 @@ function App() {
                     ))}
                   </div>
                 </article>
+
+                <article className="stage-panel">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Implementation snippets</p>
+                      <h3>Glue code proof</h3>
+                    </div>
+                  </div>
+                  <div className="snippet-stack">
+                    {implementationSnippets.map((snippet) => (
+                      <article key={snippet.label} className="snippet-card">
+                        <p className="event-name">{snippet.label}</p>
+                        <pre className="proof-preview">{snippet.body}</pre>
+                      </article>
+                    ))}
+                  </div>
+                </article>
               </section>
             </div>
           ) : null}
@@ -1839,6 +3113,7 @@ function App() {
               ['audit', 'Audit'],
               ['automation', 'Rules'],
               ['metrics', 'Metrics'],
+              ['tools', 'Tools'],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -1938,8 +3213,8 @@ function App() {
                 </div>
                 <div className="connector-grid">
                   {automationConnectors.map((connector) => {
-                    const state =
-                      connectorStates[connector.name] ?? defaultConnectorStates[connector.name]
+                    const state = connectorStates[connector.name]
+                    const report = reportsOverview?.connectors.find((entry) => entry.name === connector.name)
 
                     return (
                       <article key={connector.name} className="connector-card">
@@ -1948,19 +3223,25 @@ function App() {
                             <p className="mini-label">{connector.category}</p>
                             <h3>{connector.name}</h3>
                           </div>
-                          <span className={`connector-status connector-${state?.status ?? 'ready'}`}>
-                            {state?.status ?? 'ready'}
+                          <span className={`connector-status connector-${state?.status ?? 'attention'}`}>
+                            {state?.status ?? 'attention'}
                           </span>
                         </div>
                         <p>{connector.use}</p>
+                        {report ? (
+                          <p className="timeline-meta">
+                            {report.queued} queued • {report.processing} processing • {report.delivered} delivered
+                          </p>
+                        ) : null}
                         <div className="queue-card-footer">
                           <p className="timeline-meta">
-                            {state?.lastPing ?? 'just now'} • {state?.runs ?? 0} runs
+                            {state?.lastPing ?? 'live state unavailable'} • {state?.runs ?? 0} runs
                           </p>
                           <button
                             type="button"
                             className="button button-secondary button-small"
                             onClick={() => handleConnectorPing(connector.name)}
+                            disabled={!liveConsoleReady || !state}
                           >
                             Ping
                           </button>
@@ -2024,6 +3305,40 @@ function App() {
 
           {railTab === 'automation' ? (
             <div className="rail-stack">
+              <article className="rail-module rail-module-cyan">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Execution recipes</p>
+                    <h3>Working proof flows</h3>
+                  </div>
+                </div>
+                <div className="recipe-stack">
+                  {executionRecipes.map((recipe) => (
+                    <article key={recipe.id} className="recipe-card">
+                      <div className="section-topline">
+                        <div>
+                          <h3>{recipe.title}</h3>
+                          <p className="timeline-meta">{recipe.systems}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => handleRunRecipe(recipe.id)}
+                          disabled={
+                            !liveConsoleReady ||
+                            (recipe.id !== 'dm-sprint' && !hasLiveLead) ||
+                            recipePending === recipe.id
+                          }
+                        >
+                          {recipePending === recipe.id ? 'Running…' : 'Run'}
+                        </button>
+                      </div>
+                      <p>{recipe.detail}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
               <article className="rail-module rail-module-magenta">
                 <div className="section-topline">
                   <div>
@@ -2072,29 +3387,103 @@ function App() {
               <article className="rail-module rail-module-green">
                 <div className="section-topline">
                   <div>
-                    <p className="mini-label">Job fit</p>
-                    <h3>Requirement coverage</h3>
+                    <p className="mini-label">Requirement coverage</p>
+                    <h3>Interview proof points</h3>
                   </div>
                 </div>
                 <div className="fit-stack">
-                  {integrationFit.map((item) => (
-                    <article key={item.name} className="fit-card">
-                      <h3>{item.name}</h3>
-                      <p>{item.fit}</p>
+                  {requirementCoverage.map((item) => (
+                    <article key={item.label} className="fit-card">
+                      <div className="section-topline">
+                        <h3>{item.label}</h3>
+                        <span className="timeline-meta">{item.status}</span>
+                      </div>
+                      <p>{item.detail}</p>
                     </article>
                   ))}
                 </div>
+              </article>
+
+              <article className="rail-module rail-module-amber">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Reporting outputs</p>
+                    <h3>Slack and Sheets payloads</h3>
+                  </div>
+                  <div className="command-cluster">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleLoadProofPreview('slack')}
+                      disabled={!liveConsoleReady || recipePending === 'slack'}
+                    >
+                      {recipePending === 'slack' ? 'Loading…' : 'Slack'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleLoadProofPreview('sheets')}
+                      disabled={!liveConsoleReady || recipePending === 'sheets'}
+                    >
+                      {recipePending === 'sheets' ? 'Loading…' : 'Sheets'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={() => handleDispatchExport('slack')}
+                      disabled={!liveConsoleReady || dispatchPending === 'slack'}
+                    >
+                      {dispatchPending === 'slack' ? 'Sending Slack…' : 'Send Slack'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary button-small"
+                      onClick={() => handleDispatchExport('sheets')}
+                      disabled={!liveConsoleReady || dispatchPending === 'sheets'}
+                    >
+                      {dispatchPending === 'sheets' ? 'Sending Sheets…' : 'Send Sheets'}
+                    </button>
+                  </div>
+                </div>
+                {proofPreview ? (
+                  <div className="proof-preview-block">
+                    <p className="event-name">{proofPreview.title}</p>
+                    <pre className="proof-preview">{proofPreview.payload}</pre>
+                  </div>
+                ) : (
+                  <p className="timeline-meta">
+                    Load a live export payload to show Slack alert structure or the Sheets snapshot row format.
+                  </p>
+                )}
               </article>
             </div>
           ) : null}
 
           {railTab === 'metrics' ? (
             <div className="rail-stack">
-              <article className="rail-module rail-module-amber">
+              <article className="rail-module rail-module-amber revenue-panel">
                 <div className="section-topline">
                   <div>
-                    <p className="mini-label">Revenue dashboard</p>
+                    <p className="mini-label">Daily revenue</p>
                     <h3>Live funnel metrics</h3>
+                  </div>
+                  <div className="command-cluster">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleDispatchExport('slack')}
+                      disabled={!liveConsoleReady || dispatchPending === 'slack'}
+                    >
+                      {dispatchPending === 'slack' ? 'Sending Slack…' : 'Slack export'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => handleDispatchExport('sheets')}
+                      disabled={!liveConsoleReady || dispatchPending === 'sheets'}
+                    >
+                      {dispatchPending === 'sheets' ? 'Sending Sheets…' : 'Sheets export'}
+                    </button>
                   </div>
                 </div>
                 <div className="metric-grid">
@@ -2105,6 +3494,305 @@ function App() {
                       <p className="metric-delta">{metric.delta}</p>
                     </article>
                   ))}
+                  <article className="metric-card">
+                    <p className="metric-label">Onboarding runs</p>
+                    <p className="metric-value">{onboardingCompleted}</p>
+                    <p className="metric-delta">
+                      {onboardingRuns.length} total provisioning runs recorded.
+                    </p>
+                  </article>
+                </div>
+
+                <div className="revenue-overview">
+                  <article className="revenue-block">
+                    <div className="section-topline">
+                      <h4>Source mix</h4>
+                      <span className="timeline-meta">
+                        {reportsOverview?.queueSummary.total ?? 0} queued leads
+                      </span>
+                    </div>
+                    {revenueSourceRows.length ? (
+                      <div className="revenue-list">
+                        {revenueSourceRows.map((row) => (
+                          <div key={row.source} className="revenue-row">
+                            <div>
+                              <p className="event-name">{row.source}</p>
+                              <p className="timeline-meta">{row.count} leads</p>
+                            </div>
+                            <span className="timeline-meta">{row.share}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="timeline-meta">Load the report snapshot to see source mix.</p>
+                    )}
+                  </article>
+
+                  <article className="revenue-block">
+                    <div className="section-topline">
+                      <h4>Connector health</h4>
+                      <span className="timeline-meta">
+                        {reportsOverview?.outboxSummary.queued ?? 0} queued /{' '}
+                        {reportsOverview?.outboxSummary.delivered ?? 0} delivered
+                      </span>
+                    </div>
+                    <div className="revenue-list">
+                      {revenueConnectorRows.length ? (
+                        revenueConnectorRows.map((entry) => (
+                          <div key={entry.name} className="revenue-row revenue-row-stack">
+                            <div className="revenue-row-main">
+                              <div>
+                                <p className="event-name">{entry.name}</p>
+                                <p className="timeline-meta">
+                                  {entry.queued} queued • {entry.processing} processing • {entry.delivered} delivered
+                                </p>
+                              </div>
+                              <span className={`connector-status connector-status-${entry.status}`}>
+                                {entry.status}
+                              </span>
+                            </div>
+                            <div className="command-cluster">
+                              <span className="timeline-meta">{entry.note}</span>
+                              <button
+                                type="button"
+                                className="button button-secondary button-small"
+                                onClick={() => handleConnectorPing(entry.name)}
+                                disabled={!liveConsoleReady || !connectorStates[entry.name]}
+                              >
+                                Ping
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="timeline-meta">Connector health loads after the first report snapshot.</p>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="revenue-block revenue-block-actions">
+                    <div className="section-topline">
+                      <h4>Today&apos;s actions</h4>
+                      <span className="timeline-meta">What should move first</span>
+                    </div>
+                    <div className="revenue-actions">
+                      {revenueFollowUps.map((item) => (
+                        <article key={item.label} className="revenue-action-card">
+                          <div>
+                            <p className="event-name">{item.label}</p>
+                            <p className="timeline-meta">{item.detail}</p>
+                          </div>
+                          {item.action ? (
+                            <span className="timeline-meta revenue-action-label">{item.action}</span>
+                          ) : null}
+                        </article>
+                      ))}
+                    </div>
+                  </article>
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-slate">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Sync control</p>
+                    <h3>Local and remote drift</h3>
+                  </div>
+                  <span className="timeline-meta">
+                    {syncStatus?.configured ? 'Remote sync configured' : 'Local runtime only'}
+                  </span>
+                </div>
+                <div className="sync-card">
+                  <div className="sync-summary">
+                    <div className="sync-summary-item">
+                      <p className="metric-label">Realtime</p>
+                      <p className="metric-value">
+                        {syncStatus?.realtime.connected ? 'Connected' : 'Polling'}
+                      </p>
+                      <p className="metric-delta">
+                        {syncStatus?.realtime.eventCount ?? 0} events •{' '}
+                        {syncStatus?.realtime.pollMs ?? 0}ms poll
+                      </p>
+                    </div>
+                    <div className="sync-summary-item">
+                      <p className="metric-label">Remote snapshot</p>
+                      <p className="metric-value">
+                        {syncStatus?.remote && !('error' in syncStatus.remote) && syncStatus.remote.found
+                          ? 'Found'
+                          : 'Missing'}
+                      </p>
+                      <p className="metric-delta">
+                        {syncStatus?.remote && !('error' in syncStatus.remote)
+                          ? syncStatus.remote.updatedAt ?? 'Awaiting update'
+                          : 'No remote snapshot loaded'}
+                      </p>
+                    </div>
+                    <div className="sync-summary-item">
+                      <p className="metric-label">Mirror rows</p>
+                      <p className="metric-value">
+                        {syncStatus?.mirror && !('error' in syncStatus.mirror)
+                          ? Object.values(syncStatus.mirror).reduce((total, count) => total + count, 0)
+                          : 0}
+                      </p>
+                      <p className="metric-delta">
+                        {syncStatus?.mirror && !('error' in syncStatus.mirror)
+                          ? `${Object.keys(syncStatus.mirror).length} tables mirrored`
+                          : 'Mirror health unavailable'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="command-cluster">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={refreshSyncState}
+                      disabled={syncPending === 'status'}
+                    >
+                      {syncPending === 'status' ? 'Refreshing…' : 'Refresh status'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={async () => {
+                        setSyncPending('diff')
+                        try {
+                          const diff = await fetchSyncDiff()
+                          setSyncDiff(diff)
+                        } catch (error) {
+                          setSyncDiff(null)
+                          handleRuntimeFailure(error, 'Failed to load sync diff.')
+                        } finally {
+                          setSyncPending(null)
+                        }
+                      }}
+                      disabled={syncPending === 'diff' || !syncStatus?.configured}
+                    >
+                      {syncPending === 'diff' ? 'Loading diff…' : 'Inspect diff'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={handleSyncPush}
+                      disabled={syncPending === 'push' || !syncStatus?.configured}
+                    >
+                      {syncPending === 'push' ? 'Pushing…' : 'Push local'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={handleSyncPull}
+                      disabled={syncPending === 'pull' || !syncStatus?.configured}
+                    >
+                      {syncPending === 'pull' ? 'Pulling…' : 'Pull remote'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={handleSyncReconcile}
+                      disabled={syncPending === 'reconcile' || !syncStatus?.configured}
+                    >
+                      {syncPending === 'reconcile' ? 'Reconciling…' : 'Reconcile'}
+                    </button>
+                  </div>
+
+                  {syncDiff?.ok && syncDiff.diff ? (
+                    <div className="sync-diff-list">
+                      {Object.entries(syncDiff.diff).slice(0, 4).map(([field, diff]) => {
+                        const remoteOnly = Array.isArray((diff as { remoteOnly?: string[] }).remoteOnly)
+                          ? (diff as { remoteOnly: string[] }).remoteOnly.length
+                          : 0
+                        const localOnly = Array.isArray((diff as { localOnly?: string[] }).localOnly)
+                          ? (diff as { localOnly: string[] }).localOnly.length
+                          : 0
+                        const shared = Number((diff as { shared?: number }).shared ?? 0)
+
+                        return (
+                          <article key={field} className="sync-diff-card">
+                            <p className="event-name">{field}</p>
+                            <p className="timeline-meta">
+                              +{remoteOnly} / -{localOnly} / {shared} shared
+                            </p>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="timeline-meta">
+                      Inspect the diff after a remote snapshot lands to see local versus remote drift.
+                    </p>
+                  )}
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-cyan">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Onboarding autopilot</p>
+                    <h3>Folder, SOP, and invite proof</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => handleRunRecipe('onboarding')}
+                    disabled={!liveConsoleReady || !activeLead || recipePending === 'onboarding'}
+                  >
+                    {recipePending === 'onboarding' ? 'Provisioning…' : 'Retry onboarding'}
+                  </button>
+                </div>
+                <div className="onboarding-list">
+                  {onboardingProofRuns.length ? (
+                    onboardingProofRuns.map((run) => {
+                      const lead = leadRecords.find((entry) => entry.id === run.leadId)
+                      return (
+                        <div key={run.id} className="onboarding-card-stack">
+                          <article className="onboarding-card">
+                            <div className="section-topline">
+                              <div>
+                                <p className="event-name">{lead?.name ?? run.leadId}</p>
+                                <p className="timeline-meta">
+                                  {lead?.handle ?? run.leadId} • {run.status}
+                                </p>
+                              </div>
+                              <span className="signal-badge signal-watch">Ready</span>
+                            </div>
+                            <div className="onboarding-links">
+                              <span className="onboarding-link">
+                                Folder: <code>{run.folderUrl}</code>
+                              </span>
+                              <span className="onboarding-link">
+                                SOP: <code>{run.sopUrl}</code>
+                              </span>
+                              <span className="onboarding-link">
+                                Invite: <code>{run.inviteUrl}</code>
+                              </span>
+                            </div>
+                          </article>
+                          {run.handoffState ? (
+                            <div className="onboarding-handoff-grid">
+                              {run.handoffState.destinations.map((destination) => (
+                                <article key={`${run.id}-${destination.name}`} className="onboarding-handoff-card">
+                                  <div className="section-topline">
+                                    <div>
+                                      <p className="event-name">{destination.name}</p>
+                                      <p className="timeline-meta">{destination.status}</p>
+                                    </div>
+                                    <span className="signal-badge signal-watch">Ready</span>
+                                  </div>
+                                  <p className="timeline-meta">{destination.note}</p>
+                                  <code>{destination.url}</code>
+                                </article>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <p className="timeline-meta">
+                      Provision an active lead to show folder, SOP, and invite links here.
+                    </p>
+                  )}
                 </div>
               </article>
 
@@ -2114,20 +3802,20 @@ function App() {
                     <p className="mini-label">Meta CAPI</p>
                     <h3>Server event payloads</h3>
                   </div>
-                  <span className="timeline-meta">{capiEvents.length} events</span>
+                  <span className="timeline-meta">{capiRailEvents.length} events</span>
                 </div>
                 <div className="capi-table">
-                  {capiEvents.map((event) => (
+                  {capiRailEvents.map((event) => (
                     <div key={event.eventName} className="capi-row">
-                      <div>
+                      <div className="capi-cell capi-cell-primary">
                         <p className="event-name">{event.eventName}</p>
                         <p>{event.source}</p>
                       </div>
-                      <div>
+                      <div className="capi-cell">
                         <p className="mini-label">Match keys</p>
                         <p>{event.matchKeys.join(', ')}</p>
                       </div>
-                      <div>
+                      <div className="capi-cell">
                         <p className="mini-label">Status</p>
                         <p>{event.payloadStatus}</p>
                       </div>
@@ -2150,6 +3838,131 @@ function App() {
                       <p>{module.summary}</p>
                     </article>
                   ))}
+                </div>
+              </article>
+            </div>
+          ) : null}
+
+          {railTab === 'tools' ? (
+            <div className="rail-stack">
+              <article className="rail-module rail-module-green">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Internal tools</p>
+                    <h3>Reusable operator work</h3>
+                  </div>
+                  <span className="timeline-meta">
+                    {toolArtifact ? 'Artifact ready' : 'Pick a tool to generate'}
+                  </span>
+                </div>
+                <div className="tool-template-grid">
+                  {toolTemplates.map((template) => (
+                    <article key={template.id} className="tool-template-card">
+                      <div className="section-topline">
+                        <div>
+                          <h3>{template.title}</h3>
+                          <p className="timeline-meta">{template.summary}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          onClick={() => handleBuildToolArtifact(template.id)}
+                          disabled={toolPending === template.id}
+                        >
+                          {toolPending === template.id ? 'Building…' : 'Build'}
+                        </button>
+                      </div>
+                      <p>{template.outcome}</p>
+                      <ul className="tool-step-list">
+                        {template.steps.map((step) => (
+                          <li key={step} className="timeline-meta">
+                            {step}
+                          </li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-amber">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Generated artifact</p>
+                    <h3>Copy-ready output</h3>
+                  </div>
+                  <div className="command-cluster">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={handleCopyToolArtifact}
+                      disabled={!toolArtifact}
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => setToolArtifact(null)}
+                      disabled={!toolArtifact}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                {toolArtifact ? (
+                  <div className="proof-preview-block">
+                    <p className="event-name">{toolArtifact.title}</p>
+                    <pre className="proof-preview tool-artifact">{toolArtifact.payload}</pre>
+                  </div>
+                ) : (
+                  <p className="timeline-meta">
+                    Generate a proof pack, SOP handoff, or triage note from the live console state.
+                  </p>
+                )}
+              </article>
+
+              <article className="rail-module rail-module-cyan">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Failure inbox</p>
+                    <h3>Retries and attention items</h3>
+                  </div>
+                  <span className="timeline-meta">
+                    {failedDeliveries.length} failed / {attentionConnectors.length} attention
+                  </span>
+                </div>
+                <div className="tool-failure-list">
+                  {failedDeliveries.length ? (
+                    failedDeliveries.map((item) => (
+                      <article key={item.id} className="tool-failure-card">
+                        <div className="section-topline">
+                          <div>
+                            <p className="event-name">{item.payloadLabel}</p>
+                            <p className="timeline-meta">
+                              {item.connector} • {item.channel} • {item.target}
+                            </p>
+                          </div>
+                          <span className={`connector-status connector-${item.status}`}>{item.status}</span>
+                        </div>
+                        <p>{item.note}</p>
+                        <div className="queue-card-footer">
+                          <p className="timeline-meta">{item.lastAttempt}</p>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => handleDeliveryRetry(item.id)}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="timeline-meta">
+                      No failed deliveries right now. The outbox is clean and ready for the next run.
+                    </p>
+                  )}
                 </div>
               </article>
             </div>

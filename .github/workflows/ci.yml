@@ -29,3 +29,18 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Create local env file for smoke tests
+        run: |
+          cat > .env.local <<'EOF'
+          ADMIN_USERNAME=operator
+          ADMIN_PASSWORD=operator
+          ADMIN_SESSION_SECRET=ci-session-secret
+          ADMIN_SESSION_COOKIE_SECURE=false
+          EOF
+
+      - name: Backend smoke
+        run: npm run test:backend
+
+      - name: HTTP smoke
+        run: npm run test:http

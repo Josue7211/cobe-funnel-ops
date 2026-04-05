@@ -2,9 +2,11 @@
 
 `creator-funnel-ops` is a compact operator console for creator funnel ops: lead capture to checkout, call recovery, and revenue visibility.
 
-Live demo:
-- [GitHub Pages](https://josue7211.github.io/cobe-funnel-ops/)
-- [GitHub repo](https://github.com/Josue7211/cobe-funnel-ops)
+Supported runtime contract:
+- one Node-capable deployment
+- one same-origin browser entrypoint
+- Express serves the built app shell and `/api/*`
+- the authenticated console uses the same origin for login, queue reads, workflow mutations, reports, and realtime
 
 It ships three connected modules in one operator-facing app:
 
@@ -39,10 +41,11 @@ For teams running creator funnels, the same problems repeat: high-intent DMs, le
 
 No paid services are required to run it locally. ManyChat, GHL, Zapier/Make, and Meta CAPI are represented as operator-friendly mirrors so the logic stays visible and cheap to run, while the backend persists live state in SQLite.
 
-### Run it
+## Run it
 
-- Frontend + API: `npm run dev`
-- Reset seeded SQL data: `npm run reset:data`
+- Frontend + API dev runtime: `npm run dev`
+- Production-like same-origin runtime: `npm run build && npm start`
+- Reset SQL data: `npm run reset:data`
 
 ## Local development
 
@@ -53,18 +56,57 @@ npm install
 npm run dev
 ```
 
+`npm run dev` starts:
+- Vite on the frontend for local development only
+- Express on the API runtime
+- a local dev proxy for `/api/*`
+
+That proxy is not the deployment contract. It only exists to make local iteration convenient.
+
 Build:
 
 ```bash
 npm run build
 ```
 
+Run the same-origin server after building:
+
+```bash
+npm start
+```
+
+In the supported topology, Express serves:
+- the built SPA from `dist/`
+- authenticated API routes at `/api/*`
+- realtime at `/api/realtime/stream`
+
+Static-only hosting is not a supported live product path for Phase 1 because the operator console depends on the same-origin backend runtime.
+
+## Deployment
+
+Phase 1 supports one honest deployment topology:
+
+1. Build the frontend with `npm run build`
+2. Run `node server/index.js` on a Node-capable host
+3. Serve the built `dist/` assets and `/api/*` from the same origin
+
+Equivalent reverse-proxy setups are fine if the browser still sees one origin for the app shell and API.
+
+Required behavior for a supported deployment:
+- `/` returns the built operator console
+- `/api/auth/session` checks the current admin session
+- `/api/queue`, `/api/reports/overview`, workflow mutations, and realtime all resolve on that same origin
+
+Not supported as the primary product path:
+- GitHub Pages
+- static-only Vercel/Netlify style hosting without the Express runtime
+- split frontend/backend deployments that rely on an undocumented browser proxy
+
 ## Repo docs
 
 - [PROJECT.md](./PROJECT.md)
 - [ROADMAP.md](./ROADMAP.md)
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- [docs/DEMO_FLOW.md](./docs/DEMO_FLOW.md)
 - [docs/SOP.md](./docs/SOP.md)
 
 ## Differentiation
