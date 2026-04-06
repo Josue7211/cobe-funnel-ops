@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -211,10 +210,18 @@ type RailTab = 'operations' | 'audit' | 'automation' | 'metrics' | 'tools'
 type AuthStatus = 'checking' | 'authenticated' | 'auth_required'
 type RuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded'
 
-const OAUTH_SESSION_EVENT = 'cobe-oauth-complete'
-const AUTO_DEMO_USERNAME = 'operator'
-const AUTO_DEMO_PASSWORD = 'operator'
+type InterviewGuideStep = {
+  id: string
+  title: string
+  skill: string
+  detail: string
+  railTab: RailTab
+  workbenchTab: WorkbenchTab
+  leadId: string
+  scenarioId: string
+}
 
+const OAUTH_SESSION_EVENT = 'cobe-oauth-complete'
 function isLocalDemoHost() {
   if (typeof window === 'undefined') {
     return false
@@ -406,6 +413,69 @@ const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   },
 }
 
+const interviewGuideSteps: InterviewGuideStep[] = [
+  {
+    id: 'onboarding',
+    title: 'Payment to onboarding autopilot',
+    skill: 'Stripe, onboarding, and Meta CAPI',
+    detail: 'Open on the strongest live proof: a won lead with onboarding handoff and purchase evidence.',
+    railTab: 'operations',
+    workbenchTab: 'payload',
+    leadId: 'lead-003',
+    scenarioId: 'scenario-003',
+  },
+  {
+    id: 'dm-sprint',
+    title: 'DM sprint funnel',
+    skill: 'JavaScript glue, ManyChat-style intake, and checkout handoff',
+    detail: 'Show how an inbound DM becomes a tagged lead and a Stripe-ready checkout path.',
+    railTab: 'operations',
+    workbenchTab: 'funnel',
+    leadId: 'lead-001',
+    scenarioId: 'scenario-001',
+  },
+  {
+    id: 'recovery',
+    title: 'Call routing and recovery',
+    skill: 'GHL pipelines, webhook routing, and no-show recovery',
+    detail: 'Show booked, no-show, and recovery handling with durable state and audit trails.',
+    railTab: 'operations',
+    workbenchTab: 'recovery',
+    leadId: 'lead-002',
+    scenarioId: 'scenario-002',
+  },
+  {
+    id: 'integrations',
+    title: 'Integration evidence',
+    skill: 'Zapier, Make, Apify, Kajabi, Skool, and Discord',
+    detail: 'Move the narrative to connector health, payload history, and replayable evidence.',
+    railTab: 'automation',
+    workbenchTab: 'payload',
+    leadId: 'lead-003',
+    scenarioId: 'scenario-003',
+  },
+  {
+    id: 'metrics',
+    title: 'Daily revenue command center',
+    skill: 'Reporting, attribution, and operator metrics',
+    detail: 'Show the revenue board, connector health, and what changes day to day.',
+    railTab: 'metrics',
+    workbenchTab: 'payload',
+    leadId: 'lead-003',
+    scenarioId: 'scenario-003',
+  },
+  {
+    id: 'proof-pack',
+    title: 'Proof pack and handoff',
+    skill: 'SOPs, handoff, and credibility artifacts',
+    detail: 'Generate the follow-up artifact the interviewer can keep after the walkthrough.',
+    railTab: 'tools',
+    workbenchTab: 'payload',
+    leadId: 'lead-003',
+    scenarioId: 'scenario-003',
+  },
+]
+
 const STORAGE_KEY = 'creator-funnel-ops-state'
 
 function readPersistedState() {
@@ -471,6 +541,12 @@ function App() {
     persisted?.workbenchTab ?? 'funnel',
   )
   const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? 'operations')
+  const [interviewMode, setInterviewMode] = useState(Boolean(persisted?.interviewMode ?? false))
+  const [replayExpanded, setReplayExpanded] = useState(false)
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const [selectedConnectorName, setSelectedConnectorName] = useState(
+    persisted?.selectedConnectorName ?? automationConnectors[0]?.name ?? 'Zapier',
+  )
   const [dashboardSummary, setDashboardSummary] = useState<{
     leadsToday: number
     bookedCalls: number
@@ -522,7 +598,6 @@ function App() {
   const [loginUsername, setLoginUsername] = useState('operator')
   const [loginPassword, setLoginPassword] = useState('')
   const [authPending, setAuthPending] = useState(false)
-  const autoLoginAttemptedRef = useRef(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [oauthProviderPending, setOauthProviderPending] = useState<'google' | 'github' | null>(null)
   const [proofPreview, setProofPreview] = useState<{
@@ -600,6 +675,7 @@ function App() {
     : []
   const liveConsoleReady = runtimeStatus === 'ready'
   const hasLiveLead = Boolean(activeLead)
+  const runtimeHost = typeof window !== 'undefined' ? window.location.host : 'server'
   const missionStats = useMemo(() => {
     const leadsToday = dashboardSummary?.leadsToday ?? leadRecords.length
     const bookedCalls =
@@ -688,6 +764,33 @@ function App() {
       return right.runs - left.runs
     })
   }, [reportsOverview])
+  const selectedConnector = useMemo(
+    () =>
+      automationConnectors.find((connector) => connector.name === selectedConnectorName) ??
+      automationConnectors[0] ??
+      null,
+    [selectedConnectorName],
+  )
+  const selectedConnectorState = selectedConnector ? connectorStates[selectedConnector.name] : undefined
+  const selectedConnectorReport = selectedConnector
+    ? reportsOverview?.connectors.find((entry) => entry.name === selectedConnector.name)
+    : undefined
+  const selectedConnectorRuns = useMemo(
+    () =>
+      selectedConnector
+        ? liveTestRuns.filter((run) => run.connector === selectedConnector.name).slice(0, 4)
+        : [],
+    [liveTestRuns, selectedConnector],
+  )
+  const selectedConnectorDeliveries = useMemo(
+    () =>
+      selectedConnector
+        ? deliveryQueue
+            .filter((item) => item.connector === selectedConnector.name)
+            .slice(0, 4)
+        : [],
+    [deliveryQueue, selectedConnector],
+  )
   const revenueFollowUps = useMemo(() => {
     const items: Array<{
       label: string
@@ -766,6 +869,14 @@ function App() {
       }
     })
   }, [activeLead?.handle, deliveryQueue])
+  const activeInterviewStep = useMemo(
+    () =>
+      interviewGuideSteps.find(
+        (step) =>
+          step.railTab === railTab && step.workbenchTab === workbenchTab && step.scenarioId === scenarioId,
+      ) ?? interviewGuideSteps[0],
+    [railTab, scenarioId, workbenchTab],
+  )
   const attentionConnectors = useMemo(
     () =>
       Object.entries(connectorStates)
@@ -987,23 +1098,6 @@ if status == no-show:
     } catch (error) {
       clearLiveConsoleState()
       setAuthSession(null)
-      if (isLocalDemoHost() && !autoLoginAttemptedRef.current) {
-        autoLoginAttemptedRef.current = true
-        try {
-          await loginAdmin(AUTO_DEMO_USERNAME, AUTO_DEMO_PASSWORD)
-          const session = await fetchAdminSession()
-          setAuthSession(session.session)
-          setAuthStatus('authenticated')
-          setRuntimeStatus('loading')
-          setApiError(null)
-          return
-        } catch {
-          setAuthStatus('auth_required')
-          setApiError('Auto demo login is unavailable. Use the form above to sign in.')
-          return
-        }
-      }
-
       setAuthStatus('auth_required')
       if (!isAuthError(error)) {
         setApiError(error instanceof Error ? error.message : 'Failed to check the current session.')
@@ -1028,6 +1122,8 @@ if status == no-show:
         operatorNotes,
         workbenchTab,
         railTab,
+        interviewMode,
+        selectedConnectorName,
         ruleDrafts,
       }),
     )
@@ -1041,6 +1137,8 @@ if status == no-show:
     selectedLeadId,
     workbenchTab,
     railTab,
+    interviewMode,
+    selectedConnectorName,
     stepIndex,
     webhookHistory,
   ])
@@ -1466,6 +1564,106 @@ if status == no-show:
       title: 'Workflow step advanced',
       detail: `Moved to ${runtime.stepLabels[boundedStep]} for ${activeScenario.title}.`,
       target: activeScenario.id,
+    })
+  }
+
+  const focusScenario = (nextScenarioId: string) => {
+    const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId)
+    if (!nextScenario) {
+      return
+    }
+
+    const nextTab = nextScenario.id === 'scenario-002' ? 'recovery' : 'funnel'
+    const nextRailTab = nextScenario.id === 'scenario-003' ? 'metrics' : 'operations'
+
+    setSelectedLeadId(nextScenario.leadId)
+    setScenarioId(nextScenario.id)
+    setWorkbenchTab(nextScenario.id === 'scenario-003' ? 'payload' : nextTab)
+    setRailTab(nextRailTab)
+    setStepIndex(0)
+    setWebhookInput(JSON.stringify(scenarioRuntimes[nextScenario.id].payloads[0], null, 2))
+    setWebhookResult({
+      status: 'accepted',
+      message: `${nextScenario.title} loaded for replay.`,
+    })
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Scenario replay loaded',
+      detail: `${nextScenario.title} is now active in replay mode.`,
+      target: nextScenario.id,
+    })
+  }
+
+  const simulateWebhookFailure = () => {
+    setScenarioId('scenario-001')
+    setSelectedLeadId('lead-001')
+    setWorkbenchTab('funnel')
+    setRailTab('operations')
+    setStepIndex(0)
+    setWebhookInput('{"event_name":"Purchase"')
+    setWebhookResult({
+      status: 'rejected',
+      message: 'Webhook failure simulated: malformed payload and failed validation.',
+    })
+    appendAuditEvent({
+      kind: 'webhook',
+      title: 'Webhook failure simulated',
+      detail: 'Malformed JSON payload loaded into the replay lab.',
+      target: 'simulated-webhook',
+    })
+  }
+
+  const simulateSyncDrift = () => {
+    setRailTab('metrics')
+    setSyncDiff({
+      ok: true,
+      diff: {
+        leads: { localOnly: ['lead-sim-local'], remoteOnly: ['lead-sim-remote'], shared: 2 },
+        bookings: { localOnly: ['book-sim-local'], remoteOnly: ['book-sim-remote'], shared: 1 },
+        conversations: { localOnly: [], remoteOnly: ['conv-sim-remote'], shared: 2 },
+        deliveries: { localOnly: ['delivery-sim-local'], remoteOnly: [], shared: 3 },
+        attempts: { localOnly: ['attempt-sim-local'], remoteOnly: ['attempt-sim-remote'], shared: 1 },
+        audit: { localOnly: [], remoteOnly: ['audit-sim-remote'], shared: 4 },
+        notes: { localOnly: ['note-sim-local'], remoteOnly: [], shared: 1 },
+        tests: { localOnly: ['test-sim-local'], remoteOnly: ['test-sim-remote'], shared: 1 },
+      },
+    })
+    setWebhookResult({
+      status: 'rejected',
+      message: 'Sync drift simulated: local and remote snapshots diverge.',
+    })
+    appendAuditEvent({
+      kind: 'connector',
+      title: 'Sync drift simulated',
+      detail: 'Injected diff highlights local-only and remote-only rows for replay narration.',
+      target: 'simulated-sync',
+    })
+  }
+
+  const simulateOnboardingFailure = () => {
+    setScenarioId('scenario-003')
+    setSelectedLeadId('lead-003')
+    setStepIndex(0)
+    setWorkbenchTab('payload')
+    setRailTab('tools')
+    setWebhookResult({
+      status: 'rejected',
+      message: 'Onboarding issue simulated: provisioning stopped before handoff completed.',
+    })
+    setToolArtifact({
+      title: 'Onboarding triage note',
+      payload: [
+        'Onboarding failed during provisioning.',
+        'Current lead: Jade Porter (@jadeteaches)',
+        'Likely failure: missing folder template or invite handoff.',
+        'Next step: retry provisioning, then confirm folder, SOP, and invite links.',
+      ].join('\n'),
+    })
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Onboarding failure simulated',
+      detail: 'Replay lab switched to the onboarding exception branch.',
+      target: 'simulated-onboarding',
     })
   }
 
@@ -1911,13 +2109,19 @@ if status == no-show:
       if (templateId === 'proof-pack') {
         payload = [
           `Proof pack: ${activeScenario.title}`,
+          `Interview mode: ${interviewMode ? 'on' : 'off'}`,
           `Lead: ${leadName} (${leadHandle})`,
           `Source: ${activeLead?.source ?? 'unknown'}`,
           `Offer: ${activeLead?.offer ?? 'unknown'}`,
           `Queue pressure: ${queueTotal} total / ${recoveryCount} recovery`,
           `Revenue snapshot: ${revenueValue}`,
           `Connector backlog: ${reportsOverview?.outboxSummary.queued ?? 0} queued / ${failedCount} failed`,
-          'Next step: show the live queue, then replay the supporting workflow once.',
+          `Narrative path: ${interviewGuideSteps.map((step) => step.title).join(' -> ')}`,
+          `Proven stack: ${requirementCoverage
+            .map((item) => item.label)
+            .slice(0, 5)
+            .join(' • ')}`,
+          'Next step: walk the queue, replay the workflow, then copy the proof pack as a follow-up artifact.',
         ].join('\n')
       } else if (templateId === 'sop-handoff') {
         payload = [
@@ -1990,6 +2194,7 @@ if status == no-show:
   }
 
   const handleRuntimeReset = async () => {
+    setInterviewMode(false)
     setRuntimeResetPending(true)
     try {
       const snapshot = await resetRuntimeState()
@@ -1998,8 +2203,13 @@ if status == no-show:
       setQueueRecords(nextQueue)
       setReportsOverview(nextReports)
       setToolArtifact(null)
-      setSelectedLeadId(nextQueue[0]?.id ?? '')
-      setScenarioId(inferScenarioIdFromStage(nextQueue[0]?.stage))
+      const nextLead = nextQueue.find((entry) => entry.id === 'lead-001') ?? nextQueue[0] ?? null
+      setSelectedLeadId(nextLead?.id ?? '')
+      const nextScenarioId = nextLead ? inferScenarioIdFromStage(nextLead.stage) : demoScenarios[0].id
+      setScenarioId(nextScenarioId)
+      setWebhookInput(JSON.stringify(scenarioRuntimes[nextScenarioId].payloads[0], null, 2))
+      setWorkbenchTab('funnel')
+      setRailTab('operations')
       setStepIndex(0)
       setWebhookResult({
         status: 'accepted',
@@ -2015,6 +2225,59 @@ if status == no-show:
     } finally {
       setRuntimeResetPending(false)
     }
+  }
+
+  const focusInterviewStep = (step: InterviewGuideStep) => {
+    setInterviewMode(true)
+    setSelectedLeadId(step.leadId)
+    setScenarioId(step.scenarioId)
+    setWorkbenchTab(step.workbenchTab)
+    setRailTab(step.railTab)
+    setStepIndex(0)
+    setWebhookInput(JSON.stringify(scenarioRuntimes[step.scenarioId].payloads[0], null, 2))
+    setWebhookResult({
+      status: 'accepted',
+      message: `${step.title} selected for the interview walkthrough.`,
+    })
+    appendAuditEvent({
+      kind: 'scenario',
+      title: 'Interview walkthrough step selected',
+      detail: `${step.title} is now the active guide step.`,
+      target: step.id,
+    })
+  }
+
+  const applyInterviewStep = async (step: InterviewGuideStep) => {
+    setInterviewMode(true)
+    setRuntimeResetPending(true)
+    try {
+      const snapshot = await resetRuntimeState()
+      applySnapshot(snapshot as never)
+      const [nextQueue, nextReports] = await Promise.all([fetchQueue(), fetchReportsOverview()])
+      setQueueRecords(nextQueue)
+      setReportsOverview(nextReports)
+      setToolArtifact(null)
+      focusInterviewStep(step)
+      setWebhookResult({
+        status: 'accepted',
+        message: `${step.title} loaded for the interview walkthrough.`,
+      })
+      markRuntimeReady()
+      return { nextQueue, nextReports }
+    } catch (error) {
+      handleRuntimeFailure(error, 'Failed to load interview mode.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Failed to load interview mode.',
+      })
+      return null
+    } finally {
+      setRuntimeResetPending(false)
+    }
+  }
+
+  const handleInterviewMode = async () => {
+    await applyInterviewStep(interviewGuideSteps[0])
   }
 
   const evaluateRule = (rule: RuleDraft): RuleTestResult => {
@@ -2463,9 +2726,26 @@ if status == no-show:
             >
               {runtimeResetPending ? 'Resetting data…' : 'Reset data'}
             </button>
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={handleInterviewMode}
+              disabled={runtimeResetPending || authStatus !== 'authenticated'}
+            >
+              {interviewMode ? 'Interview mode active' : 'Start interview mode'}
+            </button>
           </div>
 
           <div className="command-cluster">
+            <span className={`runtime-chip runtime-chip-${runtimeStatus}`}>
+              {runtimeStatus === 'ready'
+                ? 'Backend live'
+                : runtimeStatus === 'loading'
+                  ? 'Loading runtime'
+                  : runtimeStatus === 'degraded'
+                    ? 'Runtime degraded'
+                    : 'Awaiting session'}
+            </span>
             <span className="status-pill">
               {authSession?.bypass ? 'local bypass' : authSession?.sub ?? 'authenticated'}
             </span>
@@ -2509,25 +2789,70 @@ if status == no-show:
             </button>
           </div>
         </div>
-
-        {apiError ? (
-          <div className={`runtime-banner runtime-banner-${runtimeStatus === 'degraded' ? 'degraded' : 'auth_required'}`}>
-            <strong>{runtimeStatus === 'degraded' ? 'Degraded runtime' : 'Session required'}</strong>
-            <span>{apiError}</span>
+        <section className={`interview-band ${interviewMode ? 'interview-band-active' : ''}`}>
+          <div className="interview-band-copy">
+            <p className="panel-kicker">Interview mode</p>
+            <h2>
+              {interviewMode
+                ? 'Guided narrative is loaded'
+                : 'Interview walkthrough is available'}
+            </h2>
+            <p className="stat-note">
+              {interviewMode
+                ? 'Use the curated step cards to jump between the DM sprint, GHL recovery, integration evidence, revenue board, and proof pack.'
+                : 'Launch guided mode only when you want the interview script and proof path.'}
+            </p>
           </div>
+          <div className="interview-band-actions">
+            {interviewMode ? <span className="status-pill">{activeInterviewStep.title}</span> : null}
+            {interviewMode ? (
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => focusInterviewStep(activeInterviewStep)}
+                disabled={!liveConsoleReady}
+              >
+                Focus current step
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="button button-primary button-small"
+              onClick={handleInterviewMode}
+              disabled={runtimeResetPending || authStatus !== 'authenticated'}
+            >
+              {runtimeResetPending ? 'Loading…' : interviewMode ? 'Refresh guided mode' : 'Launch guided mode'}
+            </button>
+          </div>
+        </section>
+        {interviewMode ? (
+          <section className="interview-step-grid" aria-label="Interview walkthrough steps">
+            {interviewGuideSteps.map((step, index) => {
+              const isActive = activeInterviewStep.id === step.id
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={`interview-step-card ${isActive ? 'interview-step-card-active' : ''}`}
+                  onClick={() => focusInterviewStep(step)}
+                >
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">
+                        Step 0{index + 1}
+                        {isActive ? ' • active' : ''}
+                      </p>
+                      <h3>{step.title}</h3>
+                    </div>
+                    <span className="status-pill">{step.workbenchTab}</span>
+                  </div>
+                  <p className="stat-note">{step.detail}</p>
+                  <p className="timeline-meta">{step.skill}</p>
+                </button>
+              )
+            })}
+          </section>
         ) : null}
-        <div className="runtime-banner">
-          <strong>Runtime status</strong>
-          <span>
-            {runtimeStatus === 'ready'
-              ? 'Live backend connected.'
-              : runtimeStatus === 'loading'
-                ? 'Loading queue, workflow shell, reports, and rail state from the backend.'
-                : runtimeStatus === 'degraded'
-                  ? 'Live reads failed. The console shell is intentionally withholding seeded fallback data.'
-                  : 'Waiting for an authenticated live runtime.'}
-          </span>
-        </div>
       </header>
 
       <main className="console-grid">
@@ -2562,6 +2887,47 @@ if status == no-show:
               <option value="recovery">Recovery</option>
               <option value="won">Won</option>
             </select>
+          </div>
+
+          <div className="lead-queue">
+            {prioritizedLeads.length === 0 ? (
+              <div className="queue-empty-state">
+                <p className="mini-label">
+                  {runtimeStatus === 'degraded' ? 'Live queue unavailable' : 'No matching leads'}
+                </p>
+                <p className="queue-item-note">
+                  {runtimeStatus === 'degraded'
+                    ? 'Queue data is hidden until the backend can load it again.'
+                    : 'Adjust the search or stage filter to bring leads back into the active queue.'}
+                </p>
+              </div>
+            ) : null}
+
+            {prioritizedLeads.map((lead) => {
+              const isActive = lead.id === activeLead?.id
+              const priorityLabel = lead.priorityBand
+
+              return (
+                  <button
+                  key={lead.id}
+                  type="button"
+                  className={`queue-item ${isActive ? 'queue-item-active' : ''}`}
+                  onClick={() => focusScenario(inferScenarioIdFromStage(lead.stage))}
+                >
+                  <div className="queue-item-topline">
+                    <div>
+                      <p className="mini-label">{lead.source}</p>
+                      <strong>{lead.name}</strong>
+                    </div>
+                    <span className={`signal-badge signal-${priorityLabel}`}>{priorityLabel}</span>
+                  </div>
+                  <p className="timeline-meta">
+                    {lead.handle} • {lead.offer} • {lead.stage}
+                  </p>
+                  <p className="queue-item-note">{lead.recommendedAction}</p>
+                </button>
+              )
+            })}
           </div>
 
           <div className="queue-intake-block">
@@ -2613,52 +2979,6 @@ if status == no-show:
             </button>
             </div>
           </div>
-
-          <div className="lead-queue">
-            {prioritizedLeads.length === 0 ? (
-              <div className="queue-empty-state">
-                <p className="mini-label">
-                  {runtimeStatus === 'degraded' ? 'Live queue unavailable' : 'No matching leads'}
-                </p>
-                <p className="queue-item-note">
-                  {runtimeStatus === 'degraded'
-                    ? 'Queue data is hidden until the backend can load it again.'
-                    : 'Adjust the search or stage filter to bring leads back into the active queue.'}
-                </p>
-              </div>
-            ) : null}
-
-            {prioritizedLeads.map((lead) => {
-              const isActive = lead.id === activeLead?.id
-              const priorityLabel = lead.priorityBand
-
-              return (
-                <button
-                  key={lead.id}
-                  type="button"
-                  className={`queue-item ${isActive ? 'queue-item-active' : ''}`}
-                  onClick={() => {
-                    setSelectedLeadId(lead.id)
-                    setScenarioId(inferScenarioIdFromStage(lead.stage))
-                    setStepIndex(0)
-                    setWebhookResult(null)
-                  }}
-                >
-                  <div className="queue-item-topline">
-                    <div>
-                      <p className="mini-label">{lead.source}</p>
-                      <strong>{lead.name}</strong>
-                    </div>
-                    <span className={`signal-badge signal-${priorityLabel}`}>{priorityLabel}</span>
-                  </div>
-                  <p className="timeline-meta">
-                    {lead.handle} • {lead.offer} • {lead.stage}
-                  </p>
-                  <p className="queue-item-note">{lead.recommendedAction}</p>
-                </button>
-              )
-            })}
-          </div>
         </aside>
 
         <section className="console-panel workspace-panel">
@@ -2689,7 +3009,7 @@ if status == no-show:
               <div className="status-block status-block-cyan">
                 <p className="mini-label">Current step</p>
                 <strong>{runtime.stepLabels[stepIndex]}</strong>
-                <p>{activeLeadQueue[0]?.note ?? activeScenario.steps[stepIndex]}</p>
+                <p>{`Tab ${workbenchTab} • ${runtime.leadStages[stepIndex]}`}</p>
               </div>
               <div className="status-block status-block-amber">
                 <p className="mini-label">{runtime.metricLabel}</p>
@@ -2699,11 +3019,7 @@ if status == no-show:
               <div className="status-block status-block-green">
                 <p className="mini-label">Operator target</p>
                 <strong>{activeLead?.handle ?? 'No live lead loaded'}</strong>
-                <p>
-                  {activeLeadQueue[0]?.note ??
-                    activeLead?.nextAction ??
-                    'Actions stay disabled until the backend provides a live workflow target.'}
-                </p>
+                <p>{activeLead?.owner ? `Owner ${activeLead.owner}` : 'Owner unassigned'}</p>
               </div>
             </div>
 
@@ -2720,6 +3036,80 @@ if status == no-show:
                 <div className="progress-fill" style={{ width: `${progress}%` }} />
               </div>
             </div>
+
+            <section className="scenario-replay-band" aria-label="Scenario replay lab">
+              <div className="section-topline">
+                <div>
+                  <p className="panel-kicker">Replay lab</p>
+                  <h3>Success and failure branches</h3>
+                </div>
+                <div className="command-cluster">
+                  <span className="timeline-meta">Replayable scenarios from live state</span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => setReplayExpanded((current) => !current)}
+                  >
+                    {replayExpanded ? 'Hide replay' : 'Show replay'}
+                  </button>
+                </div>
+              </div>
+              {replayExpanded ? (
+                <>
+                  <div className="scenario-replay-grid">
+                    {demoScenarios.map((scenario) => {
+                      const isActive = scenario.id === activeScenario.id
+                      const branchLabel = scenario.id === 'scenario-002' ? 'failure branch' : 'success branch'
+
+                      return (
+                        <button
+                          key={scenario.id}
+                          type="button"
+                          className={`scenario-replay-card ${isActive ? 'scenario-replay-card-active' : ''}`}
+                          onClick={() => focusScenario(scenario.id)}
+                        >
+                          <div className="section-topline">
+                            <div>
+                              <p className="mini-label">{branchLabel}</p>
+                              <h3>{scenario.title}</h3>
+                            </div>
+                            <span className="status-pill">{scenario.leadId}</span>
+                          </div>
+                          <p className="stat-note">{scenario.outcome}</p>
+                          <p className="timeline-meta">{scenario.hoursSaved}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="command-cluster scenario-sim-controls">
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={simulateWebhookFailure}
+                      disabled={!liveConsoleReady}
+                    >
+                      Simulate webhook failure
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={simulateSyncDrift}
+                      disabled={!liveConsoleReady}
+                    >
+                      Simulate sync drift
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={simulateOnboardingFailure}
+                      disabled={!liveConsoleReady}
+                    >
+                      Simulate onboarding issue
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </section>
 
             {webhookResult ? (
               <div
@@ -3087,14 +3477,25 @@ if status == no-show:
                 <p className="mini-label">Operator notes</p>
                 <h3>Working memory</h3>
               </div>
-              <span className="timeline-meta">Persisted locally</span>
+              <div className="command-cluster">
+                <span className="timeline-meta">Persisted locally</span>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setNotesExpanded((current) => !current)}
+                >
+                  {notesExpanded ? 'Hide notes' : 'Show notes'}
+                </button>
+              </div>
             </div>
-            <textarea
-              className="notes-editor"
-              value={operatorNotes}
-              onChange={(event) => setOperatorNotes(event.target.value)}
-              placeholder="Capture blockers, account-specific mapping, or deployment notes."
-            />
+            {notesExpanded ? (
+              <textarea
+                className="notes-editor"
+                value={operatorNotes}
+                onChange={(event) => setOperatorNotes(event.target.value)}
+                placeholder="Capture blockers, account-specific mapping, or deployment notes."
+              />
+            ) : null}
           </section>
         </section>
 
@@ -3401,6 +3802,148 @@ if status == no-show:
                       <p>{item.detail}</p>
                     </article>
                   ))}
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-slate">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Integration evidence</p>
+                    <h3>Connector payloads and replay</h3>
+                  </div>
+                  <span className="status-pill">{selectedConnector?.name ?? 'Connector'}</span>
+                </div>
+
+                <div className="connector-selector-grid">
+                  {automationConnectors.map((connector) => {
+                    const isActive = connector.name === selectedConnector?.name
+                    return (
+                      <button
+                        key={connector.name}
+                        type="button"
+                        className={`connector-selector ${isActive ? 'connector-selector-active' : ''}`}
+                        onClick={() => setSelectedConnectorName(connector.name)}
+                      >
+                        <strong>{connector.name}</strong>
+                        <span>{connector.category}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="integration-evidence-grid">
+                  <article className="evidence-card evidence-card-primary">
+                    <div className="section-topline">
+                      <div>
+                        <p className="mini-label">Current connector</p>
+                        <h3>{selectedConnector?.name ?? 'Unknown connector'}</h3>
+                      </div>
+                      <span className={`connector-status connector-${selectedConnectorState?.status ?? 'attention'}`}>
+                        {selectedConnectorState?.status ?? 'attention'}
+                      </span>
+                    </div>
+                    <p>{selectedConnector?.use ?? 'No connector description available.'}</p>
+                    <div className="evidence-metrics">
+                      <article>
+                        <p className="metric-label">Runs</p>
+                        <p className="metric-value">{selectedConnectorState?.runs ?? 0}</p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Queued</p>
+                        <p className="metric-value">{selectedConnectorReport?.queued ?? 0}</p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Processing</p>
+                        <p className="metric-value">{selectedConnectorReport?.processing ?? 0}</p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Delivered</p>
+                        <p className="metric-value">{selectedConnectorReport?.delivered ?? 0}</p>
+                      </article>
+                    </div>
+                    <p className="timeline-meta">
+                      Last ping: {selectedConnectorState?.lastPing ?? 'unavailable'} • {selectedConnectorState?.note ?? 'No connector state yet.'}
+                    </p>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => selectedConnector && handleConnectorPing(selectedConnector.name)}
+                      disabled={!liveConsoleReady || !selectedConnectorState}
+                    >
+                      Ping selected connector
+                    </button>
+                  </article>
+
+                  <article className="evidence-card">
+                    <div className="section-topline">
+                      <div>
+                        <p className="mini-label">Replay history</p>
+                        <h3>Latest test runs</h3>
+                      </div>
+                      <span className="timeline-meta">{selectedConnectorRuns.length} shown</span>
+                    </div>
+                    <div className="evidence-list">
+                      {selectedConnectorRuns.length ? (
+                        selectedConnectorRuns.map((run) => (
+                          <article key={run.id} className="evidence-item">
+                            <div className="section-topline">
+                              <div>
+                                <p className="event-name">{run.payloadLabel}</p>
+                                <p className="timeline-meta">
+                                  {run.scenarioTitle} • {run.stepLabel}
+                                </p>
+                              </div>
+                              <span className={`connector-status connector-${run.status}`}>{run.status}</span>
+                            </div>
+                            <p className="timeline-meta">{run.resultMessage}</p>
+                            <pre className="proof-preview evidence-preview">{run.payload}</pre>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="timeline-meta">No replay runs are recorded for this connector yet.</p>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="evidence-card">
+                    <div className="section-topline">
+                      <div>
+                        <p className="mini-label">Delivery trail</p>
+                        <h3>Outbox rows</h3>
+                      </div>
+                      <span className="timeline-meta">{selectedConnectorDeliveries.length} shown</span>
+                    </div>
+                    <div className="evidence-list">
+                      {selectedConnectorDeliveries.length ? (
+                        selectedConnectorDeliveries.map((item) => (
+                          <article key={item.id} className="evidence-item">
+                            <div className="section-topline">
+                              <div>
+                                <p className="event-name">{item.payloadLabel}</p>
+                                <p className="timeline-meta">
+                                  {item.channel} • {item.target}
+                                </p>
+                              </div>
+                              <span className={`connector-status connector-${item.status}`}>{item.status}</span>
+                            </div>
+                            <p>{item.note}</p>
+                            <div className="queue-card-footer">
+                              <p className="timeline-meta">{item.lastAttempt}</p>
+                              <button
+                                type="button"
+                                className="button button-secondary button-small"
+                                onClick={() => handleDeliveryRetry(item.id)}
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="timeline-meta">No outbox rows match this connector yet.</p>
+                      )}
+                    </div>
+                  </article>
                 </div>
               </article>
 
@@ -3845,6 +4388,50 @@ if status == no-show:
 
           {railTab === 'tools' ? (
             <div className="rail-stack">
+              <article className="rail-module rail-module-slate">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Deployment proof</p>
+                    <h3>Runtime, auth, and handoff</h3>
+                  </div>
+                  <span className="timeline-meta">{runtimeHost}</span>
+                </div>
+                <div className="deployment-proof-grid">
+                  <article className="deployment-proof-card">
+                    <p className="metric-label">Runtime</p>
+                    <p className="event-name">{runtimeStatus === 'ready' ? 'Live' : runtimeStatus}</p>
+                    <p className="timeline-meta">
+                      {isLocalDemoHost()
+                        ? 'Local or dev host with the demo runtime path enabled.'
+                        : 'Deployed runtime path with the same operator console behavior.'}
+                    </p>
+                  </article>
+                  <article className="deployment-proof-card">
+                    <p className="metric-label">Auth</p>
+                    <p className="event-name">{authSession?.bypass ? 'Local bypass' : authSession?.sub ?? 'Not signed in'}</p>
+                    <p className="timeline-meta">
+                      {authStatus === 'authenticated'
+                        ? 'Operator session is authenticated and the live console is unlocked.'
+                        : 'Session state is checked before the operator surfaces render.'}
+                    </p>
+                  </article>
+                  <article className="deployment-proof-card">
+                    <p className="metric-label">Data</p>
+                    <p className="event-name">SQLite + optional Supabase mirror</p>
+                    <p className="timeline-meta">
+                      Queue, reports, realtime events, and sync all ride the same server-backed state.
+                    </p>
+                  </article>
+                  <article className="deployment-proof-card">
+                    <p className="metric-label">Handoff</p>
+                    <p className="event-name">Reset, sign in, interview mode</p>
+                    <p className="timeline-meta">
+                      Start the walkthrough, reset the runtime, and export a proof pack without leaving the console.
+                    </p>
+                  </article>
+                </div>
+              </article>
+
               <article className="rail-module rail-module-green">
                 <div className="section-topline">
                   <div>
