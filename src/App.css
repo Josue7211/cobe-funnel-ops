@@ -711,7 +711,6 @@
   right: 16px;
   bottom: 78px;
   z-index: 39;
-  max-height: min(46vh, 500px);
   overflow: auto;
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.36),
@@ -723,6 +722,24 @@
 .secondary-switcher-panel.deferred-workflow-drawer {
   gap: 14px;
   padding: 16px;
+}
+
+.secondary-panel-resize-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  margin: -4px 0 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.secondary-panel-resize-grip {
+  width: 64px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(147, 161, 182, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .secondary-panel-navbar {
@@ -882,7 +899,6 @@
   right: 16px;
   bottom: 78px;
   z-index: 39;
-  max-height: min(46vh, 500px);
   padding: 0;
   overflow: hidden;
   box-shadow:
@@ -973,9 +989,133 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.systems-navbar-meta {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .systems-panel-deferred .rail-stack {
   overflow: auto;
   padding: 0 16px 16px;
+}
+
+.systems-inbox-filters {
+  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.55fr);
+}
+
+.systems-inbox-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.systems-inbox-active-lead {
+  padding: 10px 12px;
+}
+
+.systems-inbox-module {
+  gap: 10px;
+}
+
+.systems-inbox-controls {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.systems-inbox-list {
+  gap: 8px;
+}
+
+.systems-inbox-card {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.systems-inbox-card p {
+  margin: 0;
+}
+
+.systems-rules-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.systems-metrics-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.systems-metrics-anomaly-module,
+.systems-metrics-module {
+  gap: 10px;
+}
+
+.systems-metrics-anomaly-list {
+  display: grid;
+  gap: 8px;
+}
+
+.systems-metrics-anomaly-card {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.systems-metrics-anomaly-card p {
+  margin: 0;
+}
+
+.systems-metrics-grid {
+  gap: 8px;
+}
+
+.systems-metrics-overview {
+  gap: 10px;
+}
+
+.systems-rules-module,
+.systems-recipes-module {
+  gap: 10px;
+}
+
+.systems-rules-controls {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.systems-rules-list {
+  gap: 8px;
+}
+
+.systems-rule-card {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.systems-rule-card-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.systems-rule-card .rule-actions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.systems-rule-card .rule-footer,
+.systems-rule-card .rule-condition,
+.systems-rule-card p {
+  margin: 0;
+}
+
+.systems-recipe-stack {
+  gap: 8px;
+}
+
+.systems-recipe-card {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.systems-recipe-card p {
+  margin: 0;
 }
 
 .lead-queue {
@@ -2599,6 +2739,13 @@
   }
 
   .connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .systems-inbox-filters,
+  .systems-inbox-summary-strip,
+  .systems-rules-summary-strip,
+  .systems-metrics-summary-strip {
     grid-template-columns: 1fr;
   }
 

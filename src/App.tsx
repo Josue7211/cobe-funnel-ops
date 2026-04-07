@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -877,6 +878,17 @@ const DEFAULT_PROOF_SCENARIO_ID = 'scenario-003'
 const DEFAULT_PROOF_LEAD_ID = 'lead-003'
 const DEFAULT_PROOF_WORKBENCH_TAB: WorkbenchTab = 'payload'
 const DEFAULT_PROOF_RAIL_TAB: RailTab = 'operations'
+const DEFAULT_SECONDARY_PANEL_HEIGHT = 420
+
+function clampSecondaryPanelHeight(value: number) {
+  const minHeight = 220
+  const maxHeight =
+    typeof window === 'undefined'
+      ? 780
+      : Math.max(minHeight + 40, Math.round(window.innerHeight - 78))
+
+  return Math.max(minHeight, Math.min(maxHeight, Math.round(value)))
+}
 
 function readPersistedState() {
   if (typeof window === 'undefined') {
@@ -935,6 +947,8 @@ function App() {
   const [inboxQuery, setInboxQuery] = useState('')
   const [inboxKindFilter, setInboxKindFilter] = useState<'all' | IntegrationInboxKind>('all')
   const [inboxStatusFilter, setInboxStatusFilter] = useState<'all' | IntegrationInboxStatus>('all')
+  const [showAllInbox, setShowAllInbox] = useState(false)
+  const [showAllRules, setShowAllRules] = useState(false)
   const [liveTestRuns, setLiveTestRuns] = useState<LiveTestRun[]>([])
   const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>({})
   const [webhookResult, setWebhookResult] = useState<{
@@ -947,9 +961,14 @@ function App() {
   const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? DEFAULT_PROOF_RAIL_TAB)
   const [interviewMode, setInterviewMode] = useState(Boolean(persisted?.interviewMode ?? false))
   const [secondaryPanel, setSecondaryPanel] = useState<'systems' | 'notes' | 'workflow' | null>(null)
+  const [secondaryPanelHeight, setSecondaryPanelHeight] = useState(
+    clampSecondaryPanelHeight(persisted?.secondaryPanelHeight ?? DEFAULT_SECONDARY_PANEL_HEIGHT),
+  )
   const [selectedConnectorName, setSelectedConnectorName] = useState(
     persisted?.selectedConnectorName ?? automationConnectors[0]?.name ?? 'Zapier',
   )
+  const [isSecondaryPanelResizing, setIsSecondaryPanelResizing] = useState(false)
+  const secondaryPanelResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const [selectedSnippetLabel, setSelectedSnippetLabel] = useState('JavaScript glue')
   const [payloadProofOpen, setPayloadProofOpen] = useState(false)
   const [dashboardSummary, setDashboardSummary] = useState<{
@@ -1242,10 +1261,6 @@ function App() {
     },
     [activeLeadLifecycleEntries, activeScenario.id, runtime.visibleEventIds, stepIndex],
   )
-  const integrationInboxSources = useMemo(
-    () => ['all', ...new Set(integrationInboxEntries.map((entry) => entry.source))],
-    [integrationInboxEntries],
-  )
   const getIntegrationInboxStatusClass = (status: IntegrationInboxStatus) => {
     if (status === 'processed') {
       return 'signal-normal'
@@ -1268,6 +1283,96 @@ function App() {
   const activeLeadInboxEntries = activeLead
     ? visibleInboxEntries.filter((entry) => entry.leadId === activeLead.id)
     : []
+  const inboxNeedsActionCount = visibleInboxEntries.filter(
+    (entry) => entry.status === 'queued' || entry.status === 'processing' || entry.status === 'warning',
+  ).length
+  const inboxWarningCount = visibleInboxEntries.filter((entry) => entry.status === 'warning').length
+  const inboxRecentSourceCount = new Set(visibleInboxEntries.slice(0, 8).map((entry) => entry.source)).size
+  const inboxActiveFilterLabel =
+    inboxKindFilter !== 'all'
+      ? inboxKindFilter
+      : inboxStatusFilter !== 'all'
+        ? inboxStatusFilter
+        : inboxQuery.trim()
+          ? 'search'
+          : 'all'
+  const triageInboxEntries = useMemo(() => {
+    const statusPriority: Record<IntegrationInboxStatus, number> = {
+      warning: 0,
+      queued: 1,
+      processing: 2,
+      failed: 3,
+      delivered: 4,
+      processed: 5,
+    }
+
+    return [...visibleInboxEntries]
+      .sort((left, right) => {
+        const leftPriority = statusPriority[left.status] ?? 99
+        const rightPriority = statusPriority[right.status] ?? 99
+
+        if (leftPriority !== rightPriority) {
+          return leftPriority - rightPriority
+        }
+
+        return left.timestamp < right.timestamp ? 1 : -1
+      })
+      .slice(0, 5)
+  }, [visibleInboxEntries])
+  const inboxDisplayEntries = showAllInbox ? visibleInboxEntries.slice(0, 12) : triageInboxEntries
+  const ruleSummary = useMemo(() => {
+    let active = 0
+    let attention = 0
+    let disabled = 0
+    let tested = 0
+
+    for (const rule of ruleDrafts) {
+      const result = ruleTestResults[rule.id]
+      if (rule.enabled) {
+        active += 1
+      } else {
+        disabled += 1
+      }
+
+      if (!rule.enabled || result?.status === 'fail') {
+        attention += 1
+      }
+
+      if (result) {
+        tested += 1
+      }
+    }
+
+    return { active, attention, disabled, tested }
+  }, [ruleDrafts, ruleTestResults])
+  const sortedRuleDrafts = useMemo(() => {
+    const priority = (rule: RuleDraft) => {
+      const result = ruleTestResults[rule.id]
+      if (result?.status === 'fail') {
+        return 0
+      }
+      if (!rule.enabled) {
+        return 1
+      }
+      if (!result) {
+        return 2
+      }
+      if (result.status === 'skipped') {
+        return 3
+      }
+      return 4
+    }
+
+    return [...ruleDrafts].sort((left, right) => {
+      const leftPriority = priority(left)
+      const rightPriority = priority(right)
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority
+      }
+      return left.trigger.localeCompare(right.trigger)
+    })
+  }, [ruleDrafts, ruleTestResults])
+  const visibleRuleDrafts = showAllRules ? sortedRuleDrafts : sortedRuleDrafts.slice(0, 5)
   const liveConsoleReady = runtimeStatus === 'ready'
   const hasLiveLead = Boolean(activeLead)
   const runtimeHost = typeof window !== 'undefined' ? window.location.host : 'server'
@@ -1522,6 +1627,73 @@ function App() {
     () => deliveryQueue.filter((item) => item.status === 'failed'),
     [deliveryQueue],
   )
+  const metricsAnomalies = useMemo(() => {
+    const items: Array<{
+      id: string
+      title: string
+      detail: string
+      owner: string
+      tone: 'critical' | 'watch' | 'normal'
+    }> = []
+
+    const recoveryBacklog = queueRecords.filter((entry) => entry.lane === 'recovery').length
+    if (recoveryBacklog > 0) {
+      items.push({
+        id: 'recovery-backlog',
+        title: 'Recovery backlog is live',
+        detail: `${recoveryBacklog} leads are sitting in the recovery lane and need follow-up.`,
+        owner: 'Recovery ops',
+        tone: recoveryBacklog > 2 ? 'critical' : 'watch',
+      })
+    }
+
+    const queuedRelays = deliveryQueue.filter((item) => item.status === 'queued' || item.status === 'processing').length
+    if (queuedRelays > 0) {
+      items.push({
+        id: 'relay-pressure',
+        title: 'Relay queue is building',
+        detail: `${queuedRelays} relay items are still queued or processing in the outbox.`,
+        owner: 'Outbox',
+        tone: queuedRelays > 3 ? 'critical' : 'watch',
+      })
+    }
+
+    if (failedDeliveries.length > 0) {
+      items.push({
+        id: 'failed-relays',
+        title: 'Failed relays need retries',
+        detail: `${failedDeliveries.length} delivery attempts are failed and waiting on an operator retry.`,
+        owner: 'Connector health',
+        tone: 'critical',
+      })
+    }
+
+    const staleConnector = revenueConnectorRows.find((entry) => entry.status !== 'healthy')
+    if (staleConnector) {
+      items.push({
+        id: `connector-${staleConnector.name}`,
+        title: `${staleConnector.name} is degraded`,
+        detail: staleConnector.note,
+        owner: staleConnector.name,
+        tone: staleConnector.status === 'degraded' ? 'critical' : 'watch',
+      })
+    }
+
+    if (!items.length) {
+      items.push({
+        id: 'healthy',
+        title: 'No urgent anomalies',
+        detail: 'Queue, relays, and connector health are all within normal bounds right now.',
+        owner: 'Live metrics',
+        tone: 'normal',
+      })
+    }
+
+    return items
+  }, [deliveryQueue, failedDeliveries.length, queueRecords, revenueConnectorRows])
+  const metricsNeedsActionCount = metricsAnomalies.filter((item) => item.tone !== 'normal').length
+  const metricsQueuedDrift = deliveryQueue.filter((item) => item.status === 'queued' || item.status === 'processing').length
+  const metricsRevenueRisk = queueRecords.filter((entry) => entry.lane === 'recovery').length
   const capiRailEvents = useMemo(() => {
     const eventKeys = ['Lead', 'InitiateCheckout', 'Purchase'] as const
 
@@ -1801,6 +1973,7 @@ if status == no-show:
         workbenchTab,
         railTab,
         interviewMode,
+        secondaryPanelHeight,
         selectedConnectorName,
         ruleDrafts,
       }),
@@ -1816,10 +1989,85 @@ if status == no-show:
     workbenchTab,
     railTab,
     interviewMode,
+    secondaryPanelHeight,
     selectedConnectorName,
     stepIndex,
     webhookHistory,
   ])
+
+  useEffect(() => {
+    if (!isSecondaryPanelResizing) {
+      return
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = secondaryPanelResizeRef.current
+      if (!resizeState) {
+        return
+      }
+
+      const delta = resizeState.startY - event.clientY
+      setSecondaryPanelHeight(clampSecondaryPanelHeight(resizeState.startHeight + delta))
+    }
+
+    const stopResize = () => {
+      secondaryPanelResizeRef.current = null
+      setIsSecondaryPanelResizing(false)
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+    }
+
+    if (typeof document !== 'undefined') {
+      document.body.style.cursor = 'ns-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResize)
+    window.addEventListener('pointercancel', stopResize)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResize)
+      window.removeEventListener('pointercancel', stopResize)
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+    }
+  }, [isSecondaryPanelResizing])
+
+  useEffect(() => {
+    const handleResize = () => {
+      setSecondaryPanelHeight((current) => clampSecondaryPanelHeight(current))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const handleSecondaryPanelResizeStart = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      secondaryPanelResizeRef.current = {
+        startY: event.clientY,
+        startHeight: secondaryPanelHeight,
+      }
+      setIsSecondaryPanelResizing(true)
+      event.preventDefault()
+    },
+    [secondaryPanelHeight],
+  )
+
+  const secondaryPanelStyle = useMemo(
+    () => ({ height: `${secondaryPanelHeight}px` }),
+    [secondaryPanelHeight],
+  )
 
   useEffect(() => {
     void bootstrapSession()
@@ -4170,8 +4418,16 @@ if status == no-show:
 
         <article
           className="console-panel systems-panel systems-panel-deferred"
+          style={secondaryPanelStyle}
           hidden={secondaryPanel !== 'systems'}
         >
+          <div
+            className="secondary-panel-resize-handle"
+            onPointerDown={handleSecondaryPanelResizeStart}
+            aria-label="Resize panel"
+          >
+            <span className="secondary-panel-resize-grip" />
+          </div>
           <div className="secondary-panel-navbar">
             <div className="workspace-tabs rail-tabs secondary-switcher-row">
               {[
@@ -4192,12 +4448,19 @@ if status == no-show:
                 </button>
               ))}
             </div>
-            <span className="status-pill">{railTab} view</span>
+            {railTab === 'inbox' ? (
+              <div className="command-cluster systems-navbar-meta">
+                <span className="timeline-meta">filter: {inboxActiveFilterLabel}</span>
+                <span className="status-pill">{inboxNeedsActionCount} hot</span>
+              </div>
+            ) : (
+              <span className="status-pill">{railTab} view</span>
+            )}
           </div>
 
           {railTab === 'inbox' ? (
             <div className="rail-stack">
-              <div className="filters">
+              <div className="filters systems-inbox-filters">
                 <input
                   className="audit-search"
                   type="search"
@@ -4220,87 +4483,84 @@ if status == no-show:
                 </select>
               </div>
 
-              <div className="integration-inbox-summary">
-                <article className="surface-card surface-card-tight integration-inbox-summary-card">
-                  <p className="metric-label">Inbox items</p>
-                  <p className="metric-value">{visibleInboxEntries.length}</p>
-                  <p className="metric-delta">{integrationInboxEntries.length} total in the shared flow</p>
+              <div className="workspace-summary-strip workspace-summary-strip-compact systems-inbox-summary-strip">
+                <article className="workspace-summary-item">
+                  <span>Needs action</span>
+                  <strong>{inboxNeedsActionCount}</strong>
+                  <p>Queued, processing, and warning items.</p>
                 </article>
-                <article className="surface-card surface-card-tight integration-inbox-summary-card">
-                  <p className="metric-label">Queued or processing</p>
-                  <p className="metric-value">
-                    {visibleInboxEntries.filter((entry) => entry.status === 'queued' || entry.status === 'processing').length}
-                  </p>
-                  <p className="metric-delta">Work still moving through integrations.</p>
+                <article className="workspace-summary-item">
+                  <span>Warnings</span>
+                  <strong>{inboxWarningCount}</strong>
+                  <p>Operator attention required.</p>
                 </article>
-                <article className="surface-card surface-card-tight integration-inbox-summary-card">
-                  <p className="metric-label">Warnings</p>
-                  <p className="metric-value">{visibleInboxEntries.filter((entry) => entry.status === 'warning').length}</p>
-                  <p className="metric-delta">Items that need operator attention.</p>
+                <article className="workspace-summary-item">
+                  <span>Recent sources</span>
+                  <strong>{inboxRecentSourceCount}</strong>
+                  <p>Distinct sources in the visible slice.</p>
                 </article>
-                <article className="surface-card surface-card-tight integration-inbox-summary-card">
-                  <p className="metric-label">Sources</p>
-                  <p className="metric-value">{integrationInboxSources.length - 1}</p>
-                  <p className="metric-delta">Distinct connectors and event sources.</p>
+                <article className="workspace-summary-item">
+                  <span>Scope</span>
+                  <strong>{showAllInbox ? 'Expanded' : 'Triage'}</strong>
+                  <p>{visibleInboxEntries.length} matching items.</p>
                 </article>
               </div>
 
-              {activeLead ? (
-                <article className="surface-card surface-card-standard integration-inbox-focus">
+              {activeLead && activeLeadInboxEntries.length ? (
+                <article className="queue-intake-block systems-inbox-active-lead">
                   <div className="section-topline">
                     <div>
-                      <p className="mini-label">Active lead trail</p>
+                      <p className="mini-label">Active lead</p>
                       <h3>{activeLead.name}</h3>
                     </div>
                     <span className="timeline-meta">{activeLeadInboxEntries.length} matched</span>
                   </div>
-                  <div className="integration-inbox-list">
-                    {(activeLeadInboxEntries.slice(0, 3).length ? activeLeadInboxEntries.slice(0, 3) : visibleInboxEntries.slice(0, 3)).map((entry) => (
-                      <article key={entry.id} className="surface-card surface-card-tight integration-inbox-card">
-                        <div className="section-topline">
-                          <div>
-                            <p className="event-name">{entry.source}</p>
-                            <p className="timeline-meta">
-                              {entry.kind} • {entry.target}
-                            </p>
-                          </div>
-                          <span className={`connector-status ${getIntegrationInboxStatusClass(entry.status)}`}>
-                            {entry.status}
-                          </span>
-                        </div>
-                        <p>{entry.summary}</p>
-                        {entry.effect ? <p className="timeline-meta">{entry.effect}</p> : null}
-                        <p className="timeline-meta">{entry.timestamp}</p>
-                      </article>
-                    ))}
-                  </div>
+                  <p className="timeline-meta">
+                    Inbox prioritizes the selected lead when matching events are available.
+                  </p>
                 </article>
               ) : null}
 
-              <article className="rail-module rail-module-slate">
+              <article className="rail-module rail-module-slate systems-inbox-module">
                 <div className="section-topline">
                   <div>
                     <p className="mini-label">Integration inbox</p>
-                    <h3>Shared event stream</h3>
+                    <h3>{showAllInbox ? 'Expanded stream' : 'Inbox triage'}</h3>
                   </div>
-                  <select
-                    className="audit-select"
-                    value={inboxStatusFilter}
-                    onChange={(event) => setInboxStatusFilter(event.target.value as 'all' | IntegrationInboxStatus)}
-                  >
-                    <option value="all">All statuses</option>
-                    <option value="queued">Queued</option>
-                    <option value="processing">Processing</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="failed">Failed</option>
-                    <option value="processed">Processed</option>
-                    <option value="warning">Warning</option>
-                  </select>
+                  <div className="command-cluster systems-inbox-controls">
+                    <select
+                      className="audit-select"
+                      value={inboxStatusFilter}
+                      onChange={(event) => setInboxStatusFilter(event.target.value as 'all' | IntegrationInboxStatus)}
+                    >
+                      <option value="all">All statuses</option>
+                      <option value="queued">Queued</option>
+                      <option value="processing">Processing</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="failed">Failed</option>
+                      <option value="processed">Processed</option>
+                      <option value="warning">Warning</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => setShowAllInbox((current) => !current)}
+                    >
+                      {showAllInbox ? 'Show triage' : 'Show all'}
+                    </button>
+                  </div>
                 </div>
-                <div className="integration-inbox-list">
-                  {visibleInboxEntries.length ? (
-                    visibleInboxEntries.slice(0, 10).map((entry) => (
-                      <article key={entry.id} className="surface-card surface-card-standard integration-inbox-card">
+
+                {!showAllInbox ? (
+                  <p className="timeline-meta">
+                    Default view shows the highest-signal items first so the drawer stays scannable.
+                  </p>
+                ) : null}
+
+                <div className="integration-inbox-list systems-inbox-list">
+                  {inboxDisplayEntries.length ? (
+                    inboxDisplayEntries.map((entry) => (
+                      <article key={entry.id} className="surface-card surface-card-tight integration-inbox-card systems-inbox-card">
                         <div className="section-topline">
                           <div>
                             <p className="event-name">{entry.source}</p>
@@ -4517,16 +4777,113 @@ if status == no-show:
 
           {railTab === 'automation' ? (
             <div className="rail-stack">
-              <article className="rail-module rail-module-cyan">
+              <div className="workspace-summary-strip workspace-summary-strip-compact systems-rules-summary-strip">
+                <article className="workspace-summary-item">
+                  <span>Active</span>
+                  <strong>{ruleSummary.active}</strong>
+                  <p>Enabled automations in this environment.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Attention</span>
+                  <strong>{ruleSummary.attention}</strong>
+                  <p>Failed tests or disabled rules.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Disabled</span>
+                  <strong>{ruleSummary.disabled}</strong>
+                  <p>Not currently participating in automation.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Last tests</span>
+                  <strong>{ruleSummary.tested}</strong>
+                  <p>Rules with a recorded test result.</p>
+                </article>
+              </div>
+
+              <article className="rail-module rail-module-magenta systems-rules-module">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Rule triage</p>
+                    <h3>{showAllRules ? 'Expanded rule coverage' : 'Attention-first rules'}</h3>
+                  </div>
+                  <div className="command-cluster systems-rules-controls">
+                    <span className="signal-badge signal-watch">{ruleSummary.attention} attention</span>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      onClick={() => setShowAllRules((current) => !current)}
+                    >
+                      {showAllRules ? 'Show triage' : 'Show all'}
+                    </button>
+                  </div>
+                </div>
+                {!showAllRules ? (
+                  <p className="timeline-meta">
+                    Failed and disabled rules are pinned first so operators can scan issues without reading every card.
+                  </p>
+                ) : null}
+                <div className="rule-stack systems-rules-list">
+                  {visibleRuleDrafts.map((rule) => {
+                    const sourceRule = automationRules.find((entry) => entry.id === rule.id)
+                    const result = ruleTestResults[rule.id]
+                    const toneClass =
+                      result?.status === 'fail'
+                        ? 'signal-critical'
+                        : !rule.enabled
+                          ? 'signal-watch'
+                          : result?.status === 'pass'
+                            ? 'signal-normal'
+                            : 'signal-watch'
+
+                    return (
+                      <article key={rule.id} className={`rule-card systems-rule-card ${rule.enabled ? '' : 'rule-disabled'}`}>
+                        <div className="section-topline">
+                          <div>
+                            <p className="mini-label">{sourceRule?.system}</p>
+                            <h3>{rule.trigger}</h3>
+                          </div>
+                          <div className="command-cluster systems-rule-card-actions">
+                            <span className={`signal-badge ${toneClass}`}>
+                              {result ? result.status : rule.enabled ? 'untested' : 'disabled'}
+                            </span>
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => handleRuleTest(rule.id)}
+                            >
+                              Run test
+                            </button>
+                          </div>
+                        </div>
+                        <p className="rule-condition">{rule.condition}</p>
+                        <ul className="rule-actions">
+                          {rule.actions.slice(0, 2).map((action) => (
+                            <li key={action}>{action}</li>
+                          ))}
+                        </ul>
+                        <p className="rule-footer">
+                          {result
+                            ? `Test result: ${result.status.toUpperCase()} • ${result.detail}`
+                            : rule.enabled
+                              ? 'Test result: not run yet.'
+                              : 'Rule is disabled and not participating in live automation.'}
+                        </p>
+                      </article>
+                    )
+                  })}
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-cyan systems-recipes-module">
                 <div className="section-topline">
                   <div>
                     <p className="mini-label">Execution recipes</p>
                     <h3>Working proof flows</h3>
                   </div>
                 </div>
-                <div className="recipe-stack">
+                <div className="recipe-stack systems-recipe-stack">
                   {executionRecipes.map((recipe) => (
-                    <article key={recipe.id} className="recipe-card">
+                    <article key={recipe.id} className="recipe-card systems-recipe-card">
                       <div className="section-topline">
                         <div>
                           <h3>{recipe.title}</h3>
@@ -4548,51 +4905,6 @@ if status == no-show:
                       <p>{recipe.detail}</p>
                     </article>
                   ))}
-                </div>
-              </article>
-
-              <article className="rail-module rail-module-magenta">
-                <div className="section-topline">
-                  <div>
-                    <p className="mini-label">Rule lab</p>
-                    <h3>Automation coverage</h3>
-                  </div>
-                  <span className="signal-badge signal-watch">{ruleDrafts.length} active</span>
-                </div>
-                <div className="rule-stack">
-                  {ruleDrafts.map((rule) => {
-                    const sourceRule = automationRules.find((entry) => entry.id === rule.id)
-                    const result = ruleTestResults[rule.id]
-
-                    return (
-                      <article key={rule.id} className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}>
-                        <div className="section-topline">
-                          <div>
-                            <p className="mini-label">{sourceRule?.system}</p>
-                            <h3>{rule.trigger}</h3>
-                          </div>
-                          <button
-                            type="button"
-                            className="button button-secondary button-small"
-                            onClick={() => handleRuleTest(rule.id)}
-                          >
-                            Run test
-                          </button>
-                        </div>
-                        <p className="rule-condition">{rule.condition}</p>
-                        <ul className="rule-actions">
-                          {rule.actions.map((action) => (
-                            <li key={action}>{action}</li>
-                          ))}
-                        </ul>
-                        <p className="rule-footer">
-                          {result
-                            ? `Test result: ${result.status.toUpperCase()} • ${result.detail}`
-                            : 'Test result: not run yet.'}
-                        </p>
-                      </article>
-                    )
-                  })}
                 </div>
               </article>
 
@@ -4948,7 +5260,64 @@ if status == no-show:
 
           {railTab === 'metrics' ? (
             <div className="rail-stack">
-              <article className="rail-module rail-module-amber revenue-panel">
+              <div className="workspace-summary-strip workspace-summary-strip-compact systems-metrics-summary-strip">
+                <article className="workspace-summary-item">
+                  <span>Needs action</span>
+                  <strong>{metricsNeedsActionCount}</strong>
+                  <p>Anomalies currently requiring operator attention.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Queued drift</span>
+                  <strong>{metricsQueuedDrift}</strong>
+                  <p>Queued or processing relays still in flight.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Failures</span>
+                  <strong>{failedDeliveries.length}</strong>
+                  <p>Failed deliveries waiting on retry.</p>
+                </article>
+                <article className="workspace-summary-item">
+                  <span>Revenue risk</span>
+                  <strong>{metricsRevenueRisk}</strong>
+                  <p>Leads currently sitting in the recovery lane.</p>
+                </article>
+              </div>
+
+              <article className="rail-module rail-module-magenta systems-metrics-anomaly-module">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Live anomalies</p>
+                    <h3>What needs attention now</h3>
+                  </div>
+                  <span className="signal-badge signal-watch">{metricsNeedsActionCount} hot</span>
+                </div>
+                <div className="systems-metrics-anomaly-list">
+                  {metricsAnomalies.map((item) => (
+                    <article key={item.id} className="surface-card surface-card-tight systems-metrics-anomaly-card">
+                      <div className="section-topline">
+                        <div>
+                          <p className="event-name">{item.title}</p>
+                          <p className="timeline-meta">{item.owner}</p>
+                        </div>
+                        <span
+                          className={`signal-badge ${
+                            item.tone === 'critical'
+                              ? 'signal-critical'
+                              : item.tone === 'watch'
+                                ? 'signal-watch'
+                                : 'signal-normal'
+                          }`}
+                        >
+                          {item.tone}
+                        </span>
+                      </div>
+                      <p>{item.detail}</p>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rail-module rail-module-amber revenue-panel systems-metrics-module">
                 <div className="section-topline">
                   <div>
                     <p className="mini-label">Daily revenue</p>
@@ -4973,7 +5342,7 @@ if status == no-show:
                     </button>
                   </div>
                 </div>
-                <div className="metric-grid">
+                <div className="metric-grid systems-metrics-grid">
                   {railMetrics.map((metric) => (
                     <article key={metric.label} className="surface-card surface-card-tight metric-card">
                       <p className="metric-label">{metric.label}</p>
@@ -4990,7 +5359,7 @@ if status == no-show:
                   </article>
                 </div>
 
-                <div className="revenue-overview">
+                <div className="revenue-overview systems-metrics-overview">
                   <article className="revenue-block">
                     <div className="section-topline">
                       <h4>Source mix</h4>
@@ -5503,7 +5872,14 @@ if status == no-show:
 
       <section className="console-secondary-shell" aria-label="Deferred workflow controls">
         {secondaryPanel === 'notes' ? (
-          <article className="console-panel secondary-switcher-panel notes-panel">
+          <article className="console-panel secondary-switcher-panel notes-panel" style={secondaryPanelStyle}>
+            <div
+              className="secondary-panel-resize-handle"
+              onPointerDown={handleSecondaryPanelResizeStart}
+              aria-label="Resize panel"
+            >
+              <span className="secondary-panel-resize-grip" />
+            </div>
             <div className="section-topline">
               <div>
                 <p className="panel-kicker">Operator notes</p>
@@ -5521,7 +5897,17 @@ if status == no-show:
         ) : null}
 
         {secondaryPanel === 'workflow' ? (
-          <article className="console-panel secondary-switcher-panel deferred-workflow-drawer">
+          <article
+            className="console-panel secondary-switcher-panel deferred-workflow-drawer"
+            style={secondaryPanelStyle}
+          >
+            <div
+              className="secondary-panel-resize-handle"
+              onPointerDown={handleSecondaryPanelResizeStart}
+              aria-label="Resize panel"
+            >
+              <span className="secondary-panel-resize-grip" />
+            </div>
             <div className="section-topline">
               <div>
                 <p className="panel-kicker">Workflow notes</p>
