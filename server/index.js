@@ -29,11 +29,11 @@ import {
   validateWebhook,
 } from './store.js'
 import {
-  fetchRemoteMirrorRows,
-  fetchRemoteMirrorCounts,
+  fetchSupabaseRows,
+  fetchSupabaseCounts,
   fetchRemoteSnapshot,
   isRemoteSyncConfigured,
-  pushRemoteMirror,
+  pushSupabaseState,
   pushRemoteSnapshot,
 } from './supabaseSync.js'
 import {
@@ -128,21 +128,21 @@ async function maybeSyncSnapshot(snapshot, source = 'sqlite-local') {
   }
   const sync = await pushRemoteSnapshot(snapshot, source)
   if (sync?.ok) {
-    const mirror = await pushRemoteMirror(snapshot)
+    const supabase = await pushSupabaseState(snapshot)
     lastRemoteDigest = sync.row?.digest ?? lastRemoteDigest
     publishRealtime('sync.pushed', {
       source,
       digest: sync.row?.digest ?? null,
       updatedAt: sync.row?.updated_at ?? null,
     })
-    if (mirror?.ok) {
-      publishRealtime('sync.mirror_updated', {
-        tables: mirror.tables,
+    if (supabase?.ok) {
+      publishRealtime('sync.supabase_updated', {
+        tables: supabase.tables,
       })
     }
     return {
       ...sync,
-      mirror,
+      supabase,
     }
   }
   return sync
@@ -250,99 +250,6 @@ function normalizeQuery(input) {
   return typeof input === 'string' ? input.trim() : ''
 }
 
-function getSupabaseAuthConfig() {
-  const url = process.env.SUPABASE_URL?.trim()
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-
-  return {
-    url: url ? url.replace(/\/$/, '') : '',
-    key: key || '',
-    enabled: Boolean(url && key),
-  }
-}
-
-function getRequestOrigin(request) {
-  const requestedOrigin = request.query?.origin
-  if (typeof requestedOrigin === 'string' && requestedOrigin.trim()) {
-    try {
-      return new URL(requestedOrigin.trim()).origin
-    } catch {
-      // ignore invalid explicit origin
-    }
-  }
-
-  const explicitOrigin = request.header('origin')?.trim()
-  if (explicitOrigin) {
-    return explicitOrigin.replace(/\/$/, '')
-  }
-
-  const referer = request.header('referer')?.trim()
-  if (referer) {
-    try {
-      const refererUrl = new URL(referer)
-      return refererUrl.origin
-    } catch {
-      // fall through
-    }
-  }
-
-  const forwardedProto = request.header('x-forwarded-proto')?.split(',')[0]?.trim()
-  const forwardedHost = request.header('x-forwarded-host')?.split(',')[0]?.trim()
-  const protocol = forwardedProto || request.protocol || 'http'
-  const host = forwardedHost || request.header('host')
-  return `${protocol}://${host}`
-}
-
-function buildOauthAuthorizeUrl(request, provider) {
-  const { url, enabled } = getSupabaseAuthConfig()
-  if (!enabled) {
-    return {
-      ok: false,
-      status: 400,
-      body: { ok: false, message: 'Supabase auth is not configured.' },
-    }
-  }
-
-  const redirectTo = `${getRequestOrigin(request)}/auth/callback`
-  const authorizeUrl = new URL(`${url}/auth/v1/authorize`)
-  authorizeUrl.searchParams.set('provider', provider)
-  authorizeUrl.searchParams.set('redirect_to', redirectTo)
-
-  return {
-    ok: true,
-    authorizeUrl: authorizeUrl.toString(),
-    redirectTo,
-  }
-}
-
-async function fetchSupabaseUser(accessToken) {
-  const { url, key, enabled } = getSupabaseAuthConfig()
-
-  if (!enabled) {
-    return { ok: false, message: 'Supabase auth is not configured.' }
-  }
-
-  const response = await fetch(`${url}/auth/v1/user`, {
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${accessToken}`,
-      'content-type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      status: response.status,
-      message: `Supabase user lookup failed with ${response.status}.`,
-      detail: await response.text(),
-    }
-  }
-
-  const user = await response.json()
-  return { ok: true, user }
-}
-
 function keyById(items = []) {
   return new Map(items.map((item) => [item.id, item]))
 }
@@ -426,77 +333,6 @@ app.post('/api/auth/login', (request, response) => {
   })
 })
 
-app.get('/api/auth/oauth/:provider', (request, response) => {
-  const provider = String(request.params.provider || '').trim().toLowerCase()
-  if (!['google', 'github'].includes(provider)) {
-    return response.status(400).json({ ok: false, message: 'Unsupported OAuth provider.' })
-  }
-
-  const result = buildOauthAuthorizeUrl(request, provider)
-  if (!result.ok) {
-    return response.status(result.status).json(result.body)
-  }
-
-  return response.redirect(result.authorizeUrl)
-})
-
-app.get('/api/auth/oauth/:provider/url', (request, response) => {
-  const provider = String(request.params.provider || '').trim().toLowerCase()
-  if (!['google', 'github'].includes(provider)) {
-    return response.status(400).json({ ok: false, message: 'Unsupported OAuth provider.' })
-  }
-
-  const result = buildOauthAuthorizeUrl(request, provider)
-  if (!result.ok) {
-    return response.status(result.status).json(result.body)
-  }
-
-  return response.json({
-    ok: true,
-    provider,
-    authorizeUrl: result.authorizeUrl,
-    redirectTo: result.redirectTo,
-  })
-})
-
-app.post('/api/auth/oauth/session', async (request, response) => {
-  const accessToken = String(request.body?.accessToken || '').trim()
-  if (!accessToken) {
-    return response.status(400).json({ ok: false, message: 'Missing OAuth access token.' })
-  }
-
-  const result = await fetchSupabaseUser(accessToken)
-  if (!result.ok) {
-    return response.status(401).json({
-      ok: false,
-      code: 'oauth_invalid',
-      message: result.message,
-    })
-  }
-
-  const username =
-    String(result.user?.email || '').trim() ||
-    String(result.user?.user_metadata?.email || '').trim() ||
-    String(result.user?.user_metadata?.user_name || '').trim() ||
-    String(result.user?.id || '').trim()
-
-  if (!username) {
-    return response.status(400).json({ ok: false, message: 'OAuth user identity is missing.' })
-  }
-
-  const token = createAdminSessionToken(username)
-  response.setHeader('Set-Cookie', createAdminSessionCookie(token))
-  return response.json({
-    ok: true,
-    user: username,
-    session: {
-      sub: username,
-      provider: String(result.user?.app_metadata?.provider || '').trim() || 'oauth',
-      exp: verifyAdminSessionToken(token).session?.exp,
-    },
-  })
-})
-
 app.get('/api/auth/session', (request, response) => {
   const sessionToken = readAdminSessionToken(request)
   const accessSession = readTrustedAccessSession(request)
@@ -524,20 +360,20 @@ app.get('/api/realtime/stream', requireAdmin, (request, response) => {
 
 app.get('/api/sync/status', async (_request, response) => {
   const remote = await fetchRemoteSnapshot()
-  const mirror = await fetchRemoteMirrorCounts()
+  const supabase = await fetchSupabaseCounts()
   const snapshotCounts = remote.ok && remote.row?.state
     ? {
-        cobe_leads: remote.row.state.leadRecords?.length ?? 0,
-        cobe_bookings: remote.row.state.bookingRecords?.length ?? 0,
-        cobe_conversations: remote.row.state.conversations?.length ?? 0,
-        cobe_messages:
+        cobe_funnel_ops_leads: remote.row.state.leadRecords?.length ?? 0,
+        cobe_funnel_ops_bookings: remote.row.state.bookingRecords?.length ?? 0,
+        cobe_funnel_ops_conversations: remote.row.state.conversations?.length ?? 0,
+        cobe_funnel_ops_messages:
           (remote.row.state.conversations ?? []).reduce(
             (count, entry) => count + (entry.messages?.length ?? 0),
             0,
           ),
-        cobe_delivery_queue: remote.row.state.deliveryQueue?.length ?? 0,
-        cobe_delivery_attempts: remote.row.state.deliveryAttempts?.length ?? 0,
-        cobe_audit_events: remote.row.state.auditEvents?.length ?? 0,
+        cobe_funnel_ops_delivery_queue: remote.row.state.deliveryQueue?.length ?? 0,
+        cobe_funnel_ops_delivery_attempts: remote.row.state.deliveryAttempts?.length ?? 0,
+        cobe_funnel_ops_audit_events: remote.row.state.auditEvents?.length ?? 0,
       }
     : null
   response.json({
@@ -554,14 +390,14 @@ app.get('/api/sync/status', async (_request, response) => {
           updatedAt: remote.row?.updated_at ?? null,
         }
       : { error: remote.message },
-    mirror: mirror.ok
+    supabase: supabase.ok
       ? Object.fromEntries(
-          Object.entries(mirror.counts).map(([table, count]) => [
+          Object.entries(supabase.counts).map(([table, count]) => [
             table,
             count || snapshotCounts?.[table] || 0,
           ]),
         )
-      : { error: mirror.message },
+      : { error: supabase.message },
   })
 })
 
@@ -798,12 +634,15 @@ app.post('/api/exports/sheets/send', requireAdmin, async (_request, response) =>
 })
 
 app.get('/api/remote/leads', async (_request, response) => {
-  const result = await fetchRemoteMirrorRows('cobe_leads', 'id,name,handle,stage,owner,source,offer')
+  const result = await fetchSupabaseRows('cobe_funnel_ops_leads', 'id,name,handle,stage,owner,source,offer')
   return result.ok ? response.json(result) : response.status(400).json(result)
 })
 
 app.get('/api/remote/deliveries', async (_request, response) => {
-  const result = await fetchRemoteMirrorRows('cobe_delivery_queue', 'id,connector,target,status,payload_label')
+  const result = await fetchSupabaseRows(
+    'cobe_funnel_ops_delivery_queue',
+    'id,connector,target,status,payload_label',
+  )
   return result.ok ? response.json(result) : response.status(400).json(result)
 })
 
@@ -1094,7 +933,7 @@ app.post('/api/notes', requireAdmin, async (request, response) => {
 app.post('/api/sync/push', requireAdmin, async (_request, response) => {
   const state = await readState()
   const result = await pushRemoteSnapshot(state, 'sqlite-manual-push')
-  const mirror = result.ok ? await pushRemoteMirror(state) : null
+  const supabase = result.ok ? await pushSupabaseState(state) : null
   if (result.ok) {
     lastRemoteDigest = result.row?.digest ?? lastRemoteDigest
     publishRealtime('sync.pushed', {
@@ -1102,13 +941,13 @@ app.post('/api/sync/push', requireAdmin, async (_request, response) => {
       digest: result.row?.digest ?? null,
       updatedAt: result.row?.updated_at ?? null,
     })
-    if (mirror?.ok) {
-      publishRealtime('sync.mirror_updated', {
-        tables: mirror.tables,
+    if (supabase?.ok) {
+      publishRealtime('sync.supabase_updated', {
+        tables: supabase.tables,
       })
     }
   }
-  return result.ok ? response.json(mirror ? { ...result, mirror } : result) : response.status(400).json(result)
+  return result.ok ? response.json(supabase ? { ...result, supabase } : result) : response.status(400).json(result)
 })
 
 app.post('/api/sync/pull', requireAdmin, async (_request, response) => {

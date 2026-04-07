@@ -1,5 +1,19 @@
 import type { FunnelStage } from './types'
 
+export type IntegrationInboxStatus = 'queued' | 'processing' | 'delivered' | 'failed' | 'processed' | 'warning'
+
+export type IntegrationEvent = {
+  id: string
+  kind: string
+  source: string
+  target: string
+  summary: string
+  status: IntegrationInboxStatus
+  timestamp: string
+  leadId?: string
+  effect?: string
+}
+
 export type ApiSnapshot = {
   leadRecords: unknown[]
   bookingRecords: unknown[]
@@ -12,6 +26,7 @@ export type ApiSnapshot = {
   liveTestRuns: unknown[]
   ruleTestResults: Record<string, unknown>
   onboardingRuns: unknown[]
+  integrationEvents?: IntegrationEvent[]
   dashboard?: Record<string, unknown>
 }
 
@@ -49,7 +64,7 @@ export type SyncStatusResponse = {
     updatedAt?: string | null
     error?: string
   }
-  mirror: Record<string, number> | { error: string }
+  supabase: Record<string, number> | { error: string }
 }
 
 export type SyncDiffResponse = {
@@ -172,31 +187,6 @@ export async function logoutAdmin() {
   }) as Promise<{ ok: boolean }>
 }
 
-export async function createOauthSession(accessToken: string) {
-  return request('/api/auth/oauth/session', {
-    method: 'POST',
-    body: JSON.stringify({ accessToken }),
-  }) as Promise<{
-    ok: boolean
-    user: string
-    session: {
-      sub: string
-      provider?: string
-      exp: number
-    }
-  }>
-}
-
-export async function fetchOauthAuthorizeUrl(provider: 'google' | 'github', origin: string) {
-  const params = new URLSearchParams({ origin })
-  return request(`/api/auth/oauth/${provider}/url?${params.toString()}`) as Promise<{
-    ok: boolean
-    provider: 'google' | 'github'
-    authorizeUrl: string
-    redirectTo: string
-  }>
-}
-
 export async function fetchBootstrap() {
   return request('/api/bootstrap')
 }
@@ -300,7 +290,7 @@ export async function pushSync() {
   }) as Promise<{
     ok: boolean
     message?: string
-    mirror?: unknown
+    supabase?: unknown
   }>
 }
 

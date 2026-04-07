@@ -7,6 +7,7 @@ Supported runtime contract:
 - one same-origin browser entrypoint
 - Express serves the built app shell and `/api/*`
 - the authenticated console uses the same origin for login, queue reads, workflow mutations, reports, and realtime
+- admin sign-in stays local to this repo; there is no Supabase OAuth redirect in the app shell
 
 It ships three connected modules in one operator-facing app:
 
@@ -40,6 +41,11 @@ For teams running creator funnels, the same problems repeat: high-intent DMs, le
 - SQLite (`node:sqlite`)
 
 No paid services are required to run it locally. ManyChat, GHL, Zapier/Make, and Meta CAPI are represented as operator-friendly mirrors so the logic stays visible and cheap to run, while the backend persists live state in SQLite.
+
+This repo also has its own Supabase-backed remote state path. Configure it with this repo's env vars:
+- `COBE_SUPABASE_URL`
+- `COBE_SUPABASE_SERVICE_ROLE_KEY`
+- `COBE_SUPABASE_STATE_TABLE`
 
 ## Run it
 
@@ -106,6 +112,7 @@ Not supported as the primary product path:
 
 - [PROJECT.md](./PROJECT.md)
 - [ROADMAP.md](./ROADMAP.md)
+- [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - [docs/SOP.md](./docs/SOP.md)
 

@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: Interview Operating System
-status: defining requirements
-stopped_at: Defining v2.0 requirements
-last_updated: "2026-04-05T23:10:00.000Z"
-last_activity: 2026-04-05
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: Phase 13-03 complete; ready to resume from Phase 13-04 discuss/plan/execute under milestone v3.0
+last_updated: "2026-04-06T16:57:29.132Z"
+last_activity: 2026-04-06 -- Phase 13 execution started
 progress:
-  total_phases: 0
+  total_phases: 8
   completed_phases: 0
-  total_plans: 0
+  total_plans: 31
   completed_plans: 0
-  percent: 0
+  percent: 35
 ---
 
 # Project State
@@ -21,18 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-05)
 
 **Core value:** An operator can move a lead from DM to payment, recovery, and onboarding from one trustworthy console without losing state or visibility.
-**Current focus:** Defining v2.0 requirements
+**Current focus:** Phase 13 — Zapier And Make Run Inspector
 
 ## Current Position
 
-Phase: Not started
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-05 — Milestone v2.0 started
+Phase: 13 (Zapier And Make Run Inspector) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 13
+Last activity: 2026-04-06 -- Phase 13 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 35%
 
-## Performance Metrics
+## Archived Performance Metrics
+
+Historical execution metrics from milestone v1.0. These are kept for reference only and do not describe current v3.0 phase progress.
 
 **Velocity:**
 
@@ -49,17 +51,6 @@ Progress: [░░░░░░░░░░] 0%
 | 03-client-onboarding-autopilot | 4 | 68min | 17min |
 | 04-daily-revenue-command-center | 4 | 72min | 18min |
 | 05-internal-tool-factory-and-ops-hardening | 5 | 76min | 15min |
-
-**Recent Trend:**
-
-- Last 5 plans: 03-04, 04-01, 04-02, 04-03, 04-04
-- Trend: Stable
-
-| Phase 05-internal-tool-factory-and-ops-hardening P01 | 23 min | 2 tasks | 4 files |
-| Phase 05-internal-tool-factory-and-ops-hardening P02 | 20 min | 2 tasks | 3 files |
-| Phase 05-internal-tool-factory-and-ops-hardening P03 | 19 min | 2 tasks | 2 files |
-| Phase 05-internal-tool-factory-and-ops-hardening P04 | 8 min | 1 tasks | 1 files |
-| Phase 05-internal-tool-factory-and-ops-hardening P05 | 6 min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -84,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 05-internal-tool-factory-and-ops-hardening]: Expose failed delivery counts in the report snapshot so the internal tool can surface real retries.
 - [Milestone v1.0]: Reframe the product around the COBE first-90-days job post and ship a real interview-grade operator system.
 - [Milestone v2.0]: Shift the next milestone toward interview proof, guided narrative, and credibility layers.
+- [Milestone v3.0]: Reframe the next milestone around integration depth, lifecycle visibility, orchestration proof, and failure handling.
+- [Phase 11: Integration Inbox And Event Contract]: Centralize integration events in one backend projection and reuse that stream for inbox and lifecycle surfaces.
+- [Phase 12: Lead Lifecycle Graph]: Make the lead journey readable through lifecycle nodes, queue badges, and active workflow routing.
 
 ### Pending Todos
 
@@ -91,11 +85,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- Frontend auth/session handling is intentionally bypassed only for local demo hosts.
 - The repo still contains brownfield work unrelated to the next milestone and should not be normalized away.
+- The current UI is still in active refinement, but roadmap priority should now favor integration behavior over surface-level chrome polish.
+- Archived phase folders from the previous milestone now live under `.planning/archive/phases/` so the active phase tree stays focused on v3.0.
 
 ## Session Continuity
 
-Last session: 2026-04-05T21:10:25.716Z
-Stopped at: Defining v2.0 requirements
+Last session: 2026-04-06T16:25:04Z
+Stopped at: Phase 13-03 complete; ready to resume from Phase 13-04 discuss/plan/execute under milestone v3.0
 Resume file: None

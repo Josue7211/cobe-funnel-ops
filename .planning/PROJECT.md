@@ -6,15 +6,15 @@ v1.0 is shipped and archived. The first-90-days COBE operator system now covers 
 
 The archived milestone details live in [`.planning/milestones/v1.0-ROADMAP.md`](./milestones/v1.0-ROADMAP.md) and [`.planning/milestones/v1.0-REQUIREMENTS.md`](./milestones/v1.0-REQUIREMENTS.md).
 
-## Current Milestone: v2.0 Interview Operating System
+## Current Milestone: v3.0 Integration Operating Graph
 
-**Goal:** Make the shipped operator console unmistakably credible in interviews by adding guided demo mode, richer integration proof, replayable failure scenarios, stronger branding, and deployment/handoff clarity.
+**Goal:** Make integrations drive the product instead of sitting beside it by turning inbound events, orchestration runs, pipeline transitions, alerts, and enrichment into first-class operator state.
 
 **Target features:**
-- One-click interview mode that loads a curated, high-signal demo state
-- A guided walkthrough that maps the job-post skills directly to live screens and workflows
-- A proof and replay layer for integrations, scenarios, and failures so the system explains itself
-- Stronger presentation, branding, and deployment proof so the product feels interview-ready and durable
+- One shared integration inbox and event contract for inbound connector activity
+- A real per-lead lifecycle graph spanning Instagram DM, ManyChat, Zapier/Make, GHL, Stripe, onboarding, Slack, Discord, and Apify
+- A run inspector that proves orchestration logic, retries, and downstream effects
+- Deeper alerting, enrichment, and failure-triage layers so the app behaves like an operating system instead of a proof wall
 
 ## What This Is
 
@@ -33,15 +33,19 @@ An operator can move a lead from DM to payment, recovery, and onboarding from on
 - ✓ Queue, reports, lead timeline, realtime SSE, and Supabase mirror sync exist behind the Express API
 - ✓ Local operator development works with `npm run dev`, `npm run test:backend`, `npm run test:http`, `npm run lint`, and `npm run build`
 - ✓ v1.0 first-90-days COBE operating system shipped: DM sprint funnel, consult routing, onboarding autopilot, revenue command center, and internal tools
+- ✓ Interview mode can present a curated high-signal demo state in one click
+- ✓ The app can guide an interviewer through the exact skills and outcomes from the job post
+- ✓ A proof pack can be generated from live state after the walkthrough
+- ✓ Integration evidence for GHL, Meta CAPI, Zapier/Make, ManyChat, Apify, Kajabi, Skool, and Discord is visible, replayable, and believable
+- ✓ The system can replay realistic success and failure scenarios across DM, booking, onboarding, sync, and connector flows
+- ✓ The visual system feels like a premium internal operations tool with real brand assets and a coherent full-width layout
 
 ### Active
 
-- [ ] Interview mode can present a curated high-signal demo state in one click
-- [ ] The app can guide an interviewer through the exact skills and outcomes from the job post
-- [ ] Integration evidence for GHL, Meta CAPI, Zapier/Make, ManyChat, Apify, Kajabi, Skool, and Discord is visible, replayable, and believable
-- [ ] The system can replay realistic success and failure scenarios across DM, booking, onboarding, sync, and connector flows
-- [ ] The visual system feels like a premium internal operations tool with real brand assets and a coherent full-width layout
-- [ ] Deployment, auth, and handoff proof are obvious enough that the app can be shown as a working product, not just a demo shell
+- [ ] Integrations behave like stateful product systems, not evidence cards or connector badges
+- [ ] Every important lead transition can be traced back to the integration event or orchestration run that caused it
+- [ ] Operators can inspect, replay, retry, and triage failed integration work without leaving the app
+- [ ] Alerting and enrichment visibly change routing, priority, or escalation behavior
 
 ### Out of Scope
 
@@ -56,7 +60,7 @@ An operator can move a lead from DM to payment, recovery, and onboarding from on
 - The repo already contains a working brownfield stack: React 19, TypeScript, Vite 8, Express 5, SQLite via `node:sqlite`, optional Supabase mirror sync, and SSE realtime updates.
 - Core business workflows from the target job post are already represented in code: DM qualification, Stripe handoff, no-show recovery, onboarding provisioning, reporting, Slack/Sheets-style exports, and Meta CAPI-ready payload handling.
 - The dominant architectural pattern is a thin client with a single Express API and a large SQLite-backed domain layer in `server/sqlStore.js`.
-- The biggest current risks for this milestone are presentation drift, weak interview narrative, lack of obvious proof for integrations, and too much hidden credibility behind the scenes.
+- The biggest current risks for this milestone are shallow connector integration, weak lifecycle visibility, orchestration that feels implied instead of inspectable, and side rails that prove systems without actually using them to drive state.
 - Codebase map is available under `.planning/codebase/` and should be treated as the source of truth for stack, structure, conventions, testing, integrations, and concerns during planning.
 
 ## Constraints
@@ -78,6 +82,7 @@ An operator can move a lead from DM to payment, recovery, and onboarding from on
 | Make deployment contract, auth contract, and live-mode integrity the first roadmap priority | Those were the main blockers preventing the current codebase from being a trustworthy internal tool | ✓ Good |
 | Reframe the first milestone around the COBE first-90-days job post | It made the delivered product directly interview-relevant and measurable | ✓ Good |
 | Move v2 scope toward interview proof, guided narrative, and credibility layers | The app already works; the next step is making that work obvious and memorable | ✓ Good |
+| Start v3 as an integration-depth milestone instead of continuing to polish top-level UI indefinitely | The clearest remaining weakness is that integrations are still too shallow relative to the job post | ✓ Good |
 
 ## Evolution
 
@@ -97,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-05 after v2.0 milestone start*
+*Last updated: 2026-04-05 after v3.0 integration roadmap creation*

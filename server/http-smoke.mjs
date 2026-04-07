@@ -136,6 +136,10 @@ async function main() {
     assert.equal(Array.isArray(queue), true)
     assert.ok(queue.length >= 1)
 
+    const bootstrap = await fetch(`${baseUrl}/api/bootstrap`).then((response) => response.json())
+    assert.equal(Array.isArray(bootstrap.integrationEvents), true)
+    assert.ok(bootstrap.integrationEvents.length >= 1)
+
     const reports = await fetch(`${baseUrl}/api/reports/overview`).then((response) => response.json())
     assert.ok(reports.dashboard)
     assert.equal(typeof reports.outboxSummary.failed, 'number')
@@ -189,7 +193,7 @@ async function main() {
     const slack = await fetch(`${baseUrl}/api/exports/slack`).then((response) => response.json())
     assert.equal(slack.channel, '#ops-alerts')
 
-    if (syncStatus.configured && syncStatus.mirror && !('error' in syncStatus.mirror)) {
+    if (syncStatus.configured && syncStatus.supabase && !('error' in syncStatus.supabase)) {
       const remoteLeads = await fetch(`${baseUrl}/api/remote/leads`).then((response) => response.json())
       assert.equal(remoteLeads.ok, true)
       assert.ok(Array.isArray(remoteLeads.rows))
@@ -206,7 +210,7 @@ async function main() {
         headers: { Cookie: loginCookie },
       }).then((response) => response.json())
       assert.equal(push.ok, true)
-      assert.ok(push.mirror)
+      assert.ok(push.supabase)
 
       const reconcile = await fetch(`${baseUrl}/api/sync/reconcile`, {
         method: 'POST',

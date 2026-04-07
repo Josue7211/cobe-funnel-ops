@@ -9,10 +9,9 @@ import {
 import './App.css'
 import {
   ApiError,
-  createOauthSession,
+  type IntegrationEvent,
   fetchSheetsExportPreview,
   fetchSlackExportPreview,
-  fetchOauthAuthorizeUrl,
   fetchAdminSession,
   fetchBootstrap,
   fetchLeadTimeline,
@@ -108,6 +107,10 @@ type LiveTestRun = {
   createdAt: string
 }
 
+type EnrichedLiveTestRun = LiveTestRun & {
+  leadId?: string
+}
+
 type WebhookValidation =
   | { ok: true; parsed: Record<string, unknown>; label: string }
   | { ok: false; message: string }
@@ -122,6 +125,22 @@ type ConnectorState = {
 }
 
 type AuditKind = 'webhook' | 'rule' | 'connector' | 'note' | 'scenario'
+
+type IntegrationInboxKind = 'delivery' | 'audit' | 'test' | 'webhook' | 'booking' | 'onboarding'
+type IntegrationInboxStatus = DeliveryStatus | 'processed' | 'warning'
+type LifecyclePhase = 'intake' | 'booking' | 'payment' | 'onboarding' | 'alert' | 'routing'
+
+type IntegrationInboxEntry = {
+  id: string
+  kind: IntegrationInboxKind
+  source: string
+  target: string
+  summary: string
+  status: IntegrationInboxStatus
+  timestamp: string
+  leadId?: string
+  effect?: string
+}
 
 type AuditEvent = {
   id: string
@@ -162,6 +181,36 @@ type QueueLead = {
   tags: string[]
   source: string
   offer: string
+}
+
+type GhlPipelinePhaseState = 'upcoming' | 'active' | 'complete'
+
+type GhlPipelineStateModelItem = {
+  id: string
+  label: string
+  summary: string
+  state: GhlPipelinePhaseState
+}
+
+type RecoveryEscalationSignal = {
+  id: string
+  title: string
+  detail: string
+  timestamp: string
+  kind: 'booking' | 'delivery' | 'audit' | 'unknown'
+}
+
+type RoutingDecision = {
+  owner: string
+  lane: string
+  ruleLabel: string
+  note: string
+}
+
+type LeadLookup = {
+  byId: Map<string, string>
+  byHandle: Map<string, string>
+  byName: Map<string, string>
 }
 
 type LeadTimelineEntry = {
@@ -206,7 +255,7 @@ type ReportsOverview = {
 
 type WorkbenchTab = 'funnel' | 'recovery' | 'payload'
 
-type RailTab = 'operations' | 'audit' | 'automation' | 'metrics' | 'tools'
+type RailTab = 'inbox' | 'operations' | 'audit' | 'automation' | 'metrics' | 'tools'
 type AuthStatus = 'checking' | 'authenticated' | 'auth_required'
 type RuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded'
 
@@ -221,7 +270,6 @@ type InterviewGuideStep = {
   scenarioId: string
 }
 
-const OAUTH_SESSION_EVENT = 'cobe-oauth-complete'
 function isLocalDemoHost() {
   if (typeof window === 'undefined') {
     return false
@@ -255,46 +303,116 @@ function parseMoneyValue(raw: string) {
   return Number.parseFloat(compact)
 }
 
+function asString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const candidate = value.trim()
+  return candidate ? candidate : undefined
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+
+  return value as Record<string, unknown>
+}
+
+function parseJsonObject(raw: string) {
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function getLeadLookup(leads: Lead[]) {
+  const byId = new Map<string, string>()
+  const byHandle = new Map<string, string>()
+  const byName = new Map<string, string>()
+
+  leads.forEach((lead) => {
+    const id = asString(lead.id)?.toLowerCase()
+    const handle = asString(lead.handle)?.toLowerCase()
+    const name = asString(lead.name)?.toLowerCase()
+
+    if (id) {
+      byId.set(id, lead.id)
+    }
+    if (handle) {
+      byHandle.set(handle, lead.id)
+    }
+    if (name) {
+      byName.set(name, lead.id)
+    }
+  })
+
+  return { byId, byHandle, byName }
+}
+
+function resolveLeadIdFromToken(token: string | undefined, lookup: LeadLookup): string | undefined {
+  const normalized = asString(token)?.toLowerCase()
+  if (!normalized) {
+    return undefined
+  }
+
+  if (lookup.byId.has(normalized)) {
+    return lookup.byId.get(normalized)
+  }
+
+  if (lookup.byHandle.has(normalized)) {
+    return lookup.byHandle.get(normalized)
+  }
+
+  const normalizedHandle = normalized.startsWith('@') ? normalized : `@${normalized}`
+  if (lookup.byHandle.has(normalizedHandle)) {
+    return lookup.byHandle.get(normalizedHandle)
+  }
+
+  return lookup.byName.get(normalized)
+}
+
+function resolveLiveTestRunLeadId(payload: string, lookup: LeadLookup) {
+  const parsed = parseJsonObject(payload)
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined
+  }
+
+  const leadObject = asObject(parsed.lead)
+  const candidateTokens = [
+    asString((parsed as Record<string, unknown>).lead_id),
+    asString((parsed as Record<string, unknown>).leadId),
+    asString((parsed as Record<string, unknown>).lead_handle),
+    asString((parsed as Record<string, unknown>).leadHandle),
+    asString((parsed as Record<string, unknown>).handle),
+    asString((parsed as Record<string, unknown>).user_id),
+    asString((parsed as Record<string, unknown>).userId),
+    asString((parsed as Record<string, unknown>).email),
+    asString(leadObject?.id),
+    asString(leadObject?.lead_id),
+    asString(leadObject?.leadId),
+    asString(leadObject?.handle),
+    asString(leadObject?.lead_handle),
+  ]
+
+  for (const token of candidateTokens) {
+    const leadId = resolveLeadIdFromToken(token, lookup)
+    if (leadId) {
+      return leadId
+    }
+  }
+
+  return undefined
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: value >= 1000 ? 1 : 0,
   }).format(Number.isFinite(value) ? value : 0)
-}
-
-function ProviderIcon({ provider }: { provider: 'google' | 'github' }) {
-  if (provider === 'google') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
-        <path
-          fill="#4285F4"
-          d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.39a4.6 4.6 0 0 1-2 3.02v2.5h3.24c1.9-1.75 2.97-4.34 2.97-7.35Z"
-        />
-        <path
-          fill="#34A853"
-          d="M12 22c2.7 0 4.96-.9 6.61-2.43l-3.24-2.5c-.9.6-2.05.96-3.37.96-2.59 0-4.79-1.75-5.58-4.1H3.07v2.57A10 10 0 0 0 12 22Z"
-        />
-        <path
-          fill="#FBBC05"
-          d="M6.42 13.93A5.96 5.96 0 0 1 6.1 12c0-.67.11-1.31.32-1.93V7.5H3.07A10 10 0 0 0 2 12c0 1.61.38 3.14 1.07 4.5l3.35-2.57Z"
-        />
-        <path
-          fill="#EA4335"
-          d="M12 5.97c1.47 0 2.79.5 3.83 1.5l2.87-2.88C16.95 2.96 14.7 2 12 2A10 10 0 0 0 3.07 7.5l3.35 2.57c.79-2.35 2.99-4.1 5.58-4.1Z"
-        />
-      </svg>
-    )
-  }
-
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="provider-icon">
-      <path
-        fill="currentColor"
-        d="M12 .5a12 12 0 0 0-3.79 23.38c.6.11.82-.26.82-.58v-2.02c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.72.08-.72 1.2.09 1.83 1.23 1.83 1.23 1.08 1.83 2.82 1.3 3.51.99.11-.77.42-1.3.77-1.59-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.46-2.38 1.23-3.22-.12-.3-.53-1.53.12-3.18 0 0 1-.32 3.3 1.23a11.46 11.46 0 0 1 6 0c2.3-1.55 3.29-1.23 3.29-1.23.66 1.65.25 2.88.13 3.18.77.84 1.23 1.91 1.23 3.22 0 4.62-2.81 5.65-5.49 5.95.43.37.82 1.1.82 2.22v3.3c0 .32.21.69.83.58A12 12 0 0 0 12 .5Z"
-      />
-    </svg>
-  )
 }
 
 function inferScenarioIdFromStage(stage?: FunnelStage) {
@@ -307,6 +425,329 @@ function inferScenarioIdFromStage(stage?: FunnelStage) {
   }
 
   return 'scenario-001'
+}
+
+function deriveLifecyclePhaseFromLead(lead: QueueLead): LifecyclePhase {
+  const source = String(lead.source || '').toLowerCase()
+  const offer = String(lead.offer || '').toLowerCase()
+
+  if (lead.stage === 'won' || offer.includes('subscription') || offer.includes('monthly')) {
+    return 'onboarding'
+  }
+
+  if (lead.stage === 'checkout-sent') {
+    return 'payment'
+  }
+
+  if (lead.stage === 'no-show' || lead.lane === 'recovery') {
+    return 'alert'
+  }
+
+  if (lead.stage === 'booked' || lead.bookingStatus === 'booked' || lead.bookingStatus === 'reminded') {
+    return 'booking'
+  }
+
+  if (source.includes('dm') || source.includes('story') || source.includes('comment') || lead.stage === 'new') {
+    return 'intake'
+  }
+
+  return 'routing'
+}
+
+function normalizeBookingStatus(value?: string | null) {
+  return String(value || '').trim().toLowerCase().replace(/[_\s]+/g, '-')
+}
+
+function lifecyclePhaseLabel(phase: LifecyclePhase) {
+  return {
+    intake: 'intake',
+    booking: 'booking',
+    payment: 'payment',
+    onboarding: 'onboarding',
+    alert: 'alert',
+    routing: 'routing',
+  }[phase]
+}
+
+function mapPipelineStateStatus(
+  lead: Lead | QueueLead | null,
+  bookingStatus: string | null | undefined,
+): GhlPipelineStateModelItem[] {
+  if (!lead) {
+    return []
+  }
+  const normalizedStatus = normalizeBookingStatus(bookingStatus)
+  const stage = lead?.stage
+  const owner = lead?.owner || 'Unassigned'
+  const lane = 'lane' in lead ? lead.lane ?? 'qualification' : 'qualification'
+  const hasBooking = Boolean(bookingStatus)
+  const isWon = stage === 'won'
+  const isNoShow = stage === 'no-show' || normalizedStatus === 'no-show'
+  const isRecovered = normalizedStatus === 'recovered'
+  const isRescheduled = normalizedStatus === 'rescheduled'
+  const isBooked = hasBooking || stage === 'booked' || stage === 'checkout-sent' || stage === 'no-show' || stage === 'recovery'
+  const isInRecovery = stage === 'recovery' || isNoShow || isRecovered
+  const activeState = isWon
+    ? 'won'
+    : isRecovered
+      ? 'recovered'
+      : isRescheduled
+        ? 'rescheduled'
+        : isInRecovery
+          ? 'recovery'
+          : isNoShow
+            ? 'no-show'
+            : isBooked
+              ? 'booked'
+              : 'booked'
+
+  return [
+    {
+      id: 'booked',
+      label: 'Booked',
+      summary: `Booked consult and routed to ${owner}${lane === 'consult' ? ' for closer coverage' : ''}.`,
+      state:
+        activeState === 'booked'
+          ? 'active'
+          : isBooked
+            ? 'complete'
+            : 'upcoming',
+    },
+    {
+      id: 'no-show',
+      label: 'No-show',
+      summary: isNoShow
+        ? 'Attendance miss detected; escalation branch is live.'
+        : 'Waiting for attendance timeout before recovery escalation.',
+      state:
+        activeState === 'no-show'
+          ? 'active'
+          : isNoShow || isRecovered || stage === 'recovery'
+            ? 'complete'
+            : 'upcoming',
+    },
+    {
+      id: 'recovery',
+      label: 'Recovery',
+      summary: isInRecovery ? 'No-show branch active with queued proof+reschedule sequence.' : 'Recovery not triggered yet.',
+      state: activeState === 'recovery' ? 'active' : isInRecovery ? 'complete' : 'upcoming',
+    },
+    {
+      id: 'recovered',
+      label: 'Recovered',
+      summary: isRecovered
+        ? 'Lead converted from no-show through recovery workflow.'
+        : 'Rebook is pending if follow-up succeeds.',
+      state: isRecovered ? (activeState === 'recovered' ? 'active' : 'complete') : 'upcoming',
+    },
+    {
+      id: 'rescheduled',
+      label: 'Rescheduled',
+      summary: isRescheduled
+        ? 'Consult is rescheduled and reminder coverage restarted.'
+        : 'Reschedule path not taken yet.',
+      state: isRescheduled ? (activeState === 'rescheduled' ? 'active' : 'complete') : 'upcoming',
+    },
+    {
+      id: 'won',
+      label: 'Won',
+      summary: isWon ? 'Lead promoted to onboarding and revenue trail.' : 'Conversion pending.',
+      state: isWon ? 'active' : isRecovered ? 'complete' : 'upcoming',
+    },
+  ]
+}
+
+function resolveRoutingLane(
+  lead: Lead | QueueLead | null,
+  booking: Booking | null,
+  bookingStatus: string | null | undefined,
+) {
+  const lane = asString((booking as Booking | null)?.routingLane)
+  const bookingNormalized = normalizeBookingStatus(bookingStatus)
+  const leadStatus = lead?.stage
+
+  if (lane === 'consult' || lane === 'recovery' || lane === 'checkout' || lane === 'onboarding' || lane === 'qualification') {
+    return lane
+  }
+
+  if (leadStatus === 'no-show' || leadStatus === 'recovery' || bookingNormalized === 'no-show' || bookingNormalized === 'recovered') {
+    return 'recovery'
+  }
+
+  if (leadStatus === 'checkout-sent' || bookingNormalized === 'reminded') {
+    return 'checkout'
+  }
+
+  if (leadStatus === 'booked' || bookingNormalized === 'booked' || bookingNormalized === 'rescheduled') {
+    return 'consult'
+  }
+
+  if (leadStatus === 'won') {
+    return 'onboarding'
+  }
+
+  return 'qualification'
+}
+
+function formatRoutingLaneLabel(lane: string) {
+  return {
+    qualification: 'Qualification',
+    consult: 'Consult Routing',
+    recovery: 'Recovery Lane',
+    checkout: 'Checkout Handoff',
+    onboarding: 'Onboarding Handoff',
+  }[lane] ?? 'Routing Lane'
+}
+
+function deriveRoutingDecision(
+  lead: Lead | null,
+  booking: Booking | null,
+  queueLead: QueueLead | null,
+  escalationSignals: RecoveryEscalationSignal[],
+): RoutingDecision {
+  const owner = booking?.owner || lead?.owner || queueLead?.owner || 'Unassigned'
+  const lane = resolveRoutingLane(lead, booking, booking?.status)
+  const ruleLabel =
+    lane === 'consult'
+      ? 'Consult booked: route to closer and reminder coverage'
+      : lane === 'recovery'
+        ? 'No-show escalation and rebooking branch'
+        : lane === 'checkout'
+          ? 'Checkout handoff and payment path'
+          : lane === 'onboarding'
+            ? 'Won/checkout handoff to onboarding'
+            : 'Qualification + intake routing'
+  const escalationContext = escalationSignals[0]?.detail
+  const note =
+    booking?.recoveryAction ||
+    escalationContext ||
+    queueLead?.nextAction ||
+    'Routing metadata is not yet written into the live timeline.'
+
+  return {
+    owner: owner || 'Unassigned',
+    lane: formatRoutingLaneLabel(lane),
+    ruleLabel,
+    note,
+  }
+}
+
+function extractNoShowEscalationSignals(events: LeadTimelineEntry[]) {
+  const uniqueKeys = new Set<string>()
+  const signals = events
+    .filter((entry) => {
+      const text = `${entry.type} ${entry.title} ${entry.detail}`.toLowerCase()
+      return text.includes('no-show') || text.includes('no show') || text.includes('noshow') || text.includes('missed call')
+    })
+    .map((entry) => {
+      const type = entry.type.toLowerCase()
+      const title = entry.title.trim() || 'Workflow signal'
+      const detail = entry.detail.trim() || 'No timeline detail captured.'
+      const kind =
+        type.includes('booking')
+          ? ('booking' as const)
+          : type.includes('delivery') || type.includes('attempt')
+            ? ('delivery' as const)
+            : type.includes('audit')
+              ? ('audit' as const)
+              : ('unknown' as const)
+
+      const signature = `${type}|${title}`.toLowerCase()
+      if (uniqueKeys.has(signature)) {
+        return null
+      }
+
+      uniqueKeys.add(signature)
+
+      return {
+        id: entry.id,
+        title,
+        detail,
+        timestamp: entry.timestamp,
+        kind,
+      }
+    })
+    .filter((entry): entry is RecoveryEscalationSignal => entry !== null)
+    .slice(0, 6)
+
+  return signals
+}
+
+type ConnectorReplayRecipe = 'dm-sprint' | 'ghl-recovery' | 'stripe-capi' | 'onboarding'
+
+type ConnectorInspectorProfile = {
+  trigger: string
+  branch: string
+  downstream: string
+  replayRecipe: ConnectorReplayRecipe
+}
+
+const connectorInspectorProfiles: Record<string, ConnectorInspectorProfile> = {
+  Zapier: {
+    trigger: 'Proof-requested intake or tagged DM lead',
+    branch: 'Proof branch',
+    downstream: 'Checkout queue, reporting branch, and audit trail',
+    replayRecipe: 'dm-sprint',
+  },
+  Make: {
+    trigger: 'No-show or delayed fulfillment handoff',
+    branch: 'Recovery / onboarding branch',
+    downstream: 'Reschedule relay, folder provisioning, and team alerts',
+    replayRecipe: 'ghl-recovery',
+  },
+  GHL: {
+    trigger: 'Booked consult or pipeline status change',
+    branch: 'Consult routing branch',
+    downstream: 'Owner assignment, reminder sequence, and recovery state',
+    replayRecipe: 'ghl-recovery',
+  },
+  'Meta CAPI': {
+    trigger: 'Stripe purchase or checkout completion',
+    branch: 'Purchase event branch',
+    downstream: 'Revenue reporting, match keys, and purchase relay',
+    replayRecipe: 'stripe-capi',
+  },
+  Slack: {
+    trigger: 'Hot lead, failure, or no-show escalation',
+    branch: 'Team alert branch',
+    downstream: 'Acknowledgment trail, retry queue, and escalation note',
+    replayRecipe: 'ghl-recovery',
+  },
+  Discord: {
+    trigger: 'Community alert or operator broadcast',
+    branch: 'Community alert branch',
+    downstream: 'Alert center, acknowledgement state, and retry trail',
+    replayRecipe: 'ghl-recovery',
+  },
+  Kajabi: {
+    trigger: 'Purchase-ready or onboarding-ready lead',
+    branch: 'Onboarding branch',
+    downstream: 'Access links, SOP bundle, and onboarding proof',
+    replayRecipe: 'onboarding',
+  },
+  Skool: {
+    trigger: 'Subscriber handoff or community access',
+    branch: 'Onboarding branch',
+    downstream: 'Access links, SOP bundle, and community invite proof',
+    replayRecipe: 'onboarding',
+  },
+  Typeform: {
+    trigger: 'Form intake or qualification response',
+    branch: 'Intake branch',
+    downstream: 'Lead record, qualification note, and checkout routing',
+    replayRecipe: 'dm-sprint',
+  },
+}
+
+function getConnectorInspectorProfile(name?: string): ConnectorInspectorProfile {
+  return (
+    (name ? connectorInspectorProfiles[name] : undefined) ?? {
+      trigger: 'Integration event selected',
+      branch: 'General relay path',
+      downstream: 'Delivery queue, audit log, and replay history',
+      replayRecipe: 'dm-sprint',
+    }
+  )
 }
 
 const scenarioRuntimes: Record<string, ScenarioRuntime> = {
@@ -446,10 +887,10 @@ const interviewGuideSteps: InterviewGuideStep[] = [
   },
   {
     id: 'integrations',
-    title: 'Integration evidence',
+    title: 'Integration inbox',
     skill: 'Zapier, Make, Apify, Kajabi, Skool, and Discord',
-    detail: 'Move the narrative to connector health, payload history, and replayable evidence.',
-    railTab: 'automation',
+    detail: 'Move the narrative to a shared inbox of payloads, audits, and replayable events.',
+    railTab: 'inbox',
     workbenchTab: 'payload',
     leadId: 'lead-003',
     scenarioId: 'scenario-003',
@@ -531,6 +972,10 @@ function App() {
   const [auditQuery, setAuditQuery] = useState('')
   const [auditKindFilter, setAuditKindFilter] = useState<'all' | AuditKind>('all')
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
+  const [integrationEvents, setIntegrationEvents] = useState<IntegrationEvent[]>([])
+  const [inboxQuery, setInboxQuery] = useState('')
+  const [inboxKindFilter, setInboxKindFilter] = useState<'all' | IntegrationInboxKind>('all')
+  const [inboxStatusFilter, setInboxStatusFilter] = useState<'all' | IntegrationInboxStatus>('all')
   const [liveTestRuns, setLiveTestRuns] = useState<LiveTestRun[]>([])
   const [ruleTestResults, setRuleTestResults] = useState<Record<string, RuleTestResult>>({})
   const [webhookResult, setWebhookResult] = useState<{
@@ -538,12 +983,11 @@ function App() {
     message: string
   } | null>(null)
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>(
-    persisted?.workbenchTab ?? 'funnel',
+    persisted?.workbenchTab ?? 'recovery',
   )
   const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? 'operations')
   const [interviewMode, setInterviewMode] = useState(Boolean(persisted?.interviewMode ?? false))
-  const [replayExpanded, setReplayExpanded] = useState(false)
-  const [notesExpanded, setNotesExpanded] = useState(false)
+  const [secondaryPanel, setSecondaryPanel] = useState<'systems' | 'notes' | 'workflow' | null>(null)
   const [selectedConnectorName, setSelectedConnectorName] = useState(
     persisted?.selectedConnectorName ?? automationConnectors[0]?.name ?? 'Zapier',
   )
@@ -571,7 +1015,7 @@ function App() {
           updatedAt?: string | null
         }
       | { error: string }
-    mirror: Record<string, number> | { error: string }
+    supabase: Record<string, number> | { error: string }
   } | null>(null)
   const [syncDiff, setSyncDiff] = useState<{
     ok: boolean
@@ -599,10 +1043,16 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('')
   const [authPending, setAuthPending] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
-  const [oauthProviderPending, setOauthProviderPending] = useState<'google' | 'github' | null>(null)
   const [proofPreview, setProofPreview] = useState<{
     title: string
     payload: string
+  } | null>(null)
+  const [connectorActionResult, setConnectorActionResult] = useState<{
+    title: string
+    detail: string
+    kind: 'replay' | 'retry'
+    status: 'accepted' | 'rejected'
+    timestamp: string
   } | null>(null)
   const [toolArtifact, setToolArtifact] = useState<{
     title: string
@@ -618,6 +1068,7 @@ function App() {
     leadRecords.find((lead) => lead.id === queueRecords[0]?.id) ??
     leadRecords[0] ??
     null
+  const activeQueueLead = queueRecords.find((entry) => entry.id === activeLead?.id) ?? null
   const activeScenario = useMemo(
     () =>
       demoScenarios.find((scenario) => scenario.id === inferScenarioIdFromStage(activeLead?.stage)) ??
@@ -646,7 +1097,6 @@ function App() {
         ),
       )
     : []
-  const progress = ((stepIndex + 1) / runtime.stepLabels.length) * 100
   const activePayload = runtime.payloads[stepIndex]
   const activeMetricValue = runtime.metricValues[stepIndex]
   const filteredLeads = queueRecords
@@ -667,11 +1117,166 @@ function App() {
     : []
   const activeLeadTimeline = leadTimeline
   const activeAutomationTrail = activeLeadTimeline.slice(0, 4).map((entry) => entry.title)
+  const leadLookup = useMemo(() => getLeadLookup(leadRecords), [leadRecords])
   const activeLeadAudit = activeLead
     ? auditEvents.filter((entry) =>
         `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.id) ||
         `${entry.target} ${entry.detail}`.toLowerCase().includes(activeLead.handle.toLowerCase()),
       )
+    : []
+  const activeLeadId = activeLead?.id ?? null
+  const activeGhlRoutingLead = activeQueueLead ?? activeLead
+  const activeBookingStatus = activeBooking?.status ?? null
+  const activeGhlPipeline = useMemo(
+    () => mapPipelineStateStatus(activeGhlRoutingLead, activeBookingStatus),
+    [activeGhlRoutingLead, activeBookingStatus],
+  )
+  const noShowEscalationSignals = useMemo(
+    () => extractNoShowEscalationSignals(activeLeadTimeline),
+    [activeLeadTimeline],
+  )
+  const activeRoutingDecision = useMemo(
+    () => deriveRoutingDecision(activeLead, activeBooking, activeQueueLead, noShowEscalationSignals),
+    [activeLead, activeBooking, activeQueueLead, noShowEscalationSignals],
+  )
+  const isNoShowEscalationLive = noShowEscalationSignals.length > 0
+  const noShowEscalationText = isNoShowEscalationLive
+    ? `Timeline contains ${noShowEscalationSignals.length} escalation signal${noShowEscalationSignals.length === 1 ? '' : 's'}.`
+    : activeLead?.stage === 'no-show' || normalizeBookingStatus(activeBooking?.status) === 'no-show'
+      ? 'No-show stage observed; escalation proof should appear in the live timeline next.'
+      : 'Escalation triggers are pending. Use Mark no-show when attendance is missed.'
+  const integrationInboxEntries = useMemo(() => {
+    if (integrationEvents.length > 0) {
+      return integrationEvents.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind as IntegrationInboxKind,
+        source: entry.source,
+        target: entry.target,
+        summary: entry.summary,
+        status: entry.status,
+        timestamp: entry.timestamp,
+        leadId: entry.leadId,
+        effect: entry.effect,
+      }))
+    }
+
+    const deliveryItems: IntegrationInboxEntry[] = deliveryQueue.map((item) => ({
+      id: `delivery-${item.id}`,
+      kind: 'delivery',
+      source: item.connector,
+      target: item.target,
+      summary: `${item.payloadLabel} • ${item.note}`,
+      status: item.status,
+      timestamp: item.lastAttempt,
+      leadId: resolveLeadIdFromToken(item.target, leadLookup),
+      effect: 'Updates relay pressure and outbox visibility.',
+    }))
+
+    const auditItems: IntegrationInboxEntry[] = auditEvents.map((entry) => ({
+      id: `audit-${entry.id}`,
+      kind: 'audit',
+      source: entry.kind,
+      target: entry.target,
+      summary: `${entry.title} • ${entry.detail}`,
+      status: entry.kind === 'connector' ? 'warning' : 'processed',
+      timestamp: entry.timestamp,
+      leadId: resolveLeadIdFromToken(entry.target, leadLookup),
+      effect:
+        entry.kind === 'connector'
+          ? 'Records connector health or a relay warning.'
+          : 'Records the workflow mutation for operator review.',
+    }))
+
+    const testItems: IntegrationInboxEntry[] = liveTestRuns.map((run) => ({
+      id: `test-${run.id}`,
+      kind: 'test',
+      source: run.connector,
+      target: run.scenarioTitle,
+      summary: `${run.stepLabel} • ${run.resultMessage}`,
+      status: run.status === 'accepted' ? 'processed' : 'warning',
+      timestamp: run.createdAt,
+      leadId: resolveLiveTestRunLeadId(run.payload, leadLookup),
+      effect: 'Proves the relay path before it reaches live workflow state.',
+    }))
+
+    return [...deliveryItems, ...auditItems, ...testItems].sort((left, right) => {
+      const timeDifference = right.timestamp.localeCompare(left.timestamp)
+      if (timeDifference !== 0) {
+        return timeDifference
+      }
+      return left.source.localeCompare(right.source)
+    })
+  }, [auditEvents, deliveryQueue, integrationEvents, leadLookup, liveTestRuns])
+  const activeLeadLifecycleEntries = useMemo(
+    () =>
+      activeLeadId
+        ? integrationInboxEntries.filter((entry) => entry.leadId === activeLeadId).slice(0, 6)
+        : [],
+    [activeLeadId, integrationInboxEntries],
+  )
+  const activeLeadLifecycleNodes = useMemo(
+    () =>
+      activeLeadLifecycleEntries.map((entry) => {
+        const haystack = `${entry.kind} ${entry.source} ${entry.target} ${entry.summary} ${entry.effect ?? ''}`.toLowerCase()
+        const phase =
+          haystack.includes('purchase') || haystack.includes('stripe')
+            ? 'payment'
+            : haystack.includes('onboarding') || haystack.includes('kajabi') || haystack.includes('skool')
+              ? 'onboarding'
+              : haystack.includes('alert') || haystack.includes('slack') || haystack.includes('discord')
+                ? 'alert'
+                : haystack.includes('booking') || haystack.includes('ghl') || haystack.includes('consult')
+                  ? 'booking'
+                  : haystack.includes('dm') || haystack.includes('instagram') || entry.kind === 'webhook'
+                    ? 'intake'
+                    : 'routing'
+        const target =
+          phase === 'intake'
+            ? { railTab: 'inbox' as const, workbenchTab: 'funnel' as const, label: 'Open DM workbench' }
+            : phase === 'booking'
+              ? { railTab: 'operations' as const, workbenchTab: 'recovery' as const, label: 'Open booking branch' }
+              : phase === 'payment'
+                ? { railTab: 'metrics' as const, workbenchTab: 'payload' as const, label: 'Open payment lab' }
+                : phase === 'onboarding'
+                  ? { railTab: 'tools' as const, workbenchTab: 'payload' as const, label: 'Open onboarding proof' }
+                  : phase === 'alert'
+                    ? { railTab: 'audit' as const, workbenchTab: 'recovery' as const, label: 'Open alert trail' }
+                    : { railTab: 'operations' as const, workbenchTab: 'funnel' as const, label: 'Open routing state' }
+
+        return {
+          ...entry,
+          phase,
+          title: entry.summary.split(' • ')[0] || entry.summary,
+          target,
+        }
+      }),
+    [activeLeadLifecycleEntries],
+  )
+  const integrationInboxSources = useMemo(
+    () => ['all', ...new Set(integrationInboxEntries.map((entry) => entry.source))],
+    [integrationInboxEntries],
+  )
+  const getIntegrationInboxStatusClass = (status: IntegrationInboxStatus) => {
+    if (status === 'processed') {
+      return 'signal-normal'
+    }
+    if (status === 'warning') {
+      return 'signal-watch'
+    }
+    return `connector-${status}`
+  }
+  const visibleInboxEntries = integrationInboxEntries
+    .filter((entry) => (inboxKindFilter === 'all' ? true : entry.kind === inboxKindFilter))
+    .filter((entry) => (inboxStatusFilter === 'all' ? true : entry.status === inboxStatusFilter))
+    .filter((entry) => {
+      if (!inboxQuery.trim()) {
+        return true
+      }
+      const haystack = `${entry.source} ${entry.target} ${entry.summary} ${entry.status}`.toLowerCase()
+      return haystack.includes(inboxQuery.toLowerCase())
+    })
+  const activeLeadInboxEntries = activeLead
+    ? visibleInboxEntries.filter((entry) => entry.leadId === activeLead.id)
     : []
   const liveConsoleReady = runtimeStatus === 'ready'
   const hasLiveLead = Boolean(activeLead)
@@ -778,18 +1383,109 @@ function App() {
   const selectedConnectorRuns = useMemo(
     () =>
       selectedConnector
-        ? liveTestRuns.filter((run) => run.connector === selectedConnector.name).slice(0, 4)
+        ? [...liveTestRuns]
+            .filter((run) => run.connector === selectedConnector.name)
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+            .slice(0, 4)
         : [],
     [liveTestRuns, selectedConnector],
   )
+  const selectedConnectorRunsWithLead = useMemo(() => {
+    return selectedConnectorRuns.map((run) => ({
+      ...run,
+      leadId: resolveLiveTestRunLeadId(run.payload, leadLookup),
+    }))
+  }, [leadLookup, selectedConnectorRuns])
   const selectedConnectorDeliveries = useMemo(
     () =>
       selectedConnector
-        ? deliveryQueue
+        ? [...deliveryQueue]
             .filter((item) => item.connector === selectedConnector.name)
+            .sort((left, right) => right.lastAttempt.localeCompare(left.lastAttempt))
             .slice(0, 4)
         : [],
     [deliveryQueue, selectedConnector],
+  )
+  const selectedConnectorFailedDeliveries = useMemo(
+    () =>
+      selectedConnector
+        ? deliveryQueue.filter(
+            (item) => item.connector === selectedConnector.name && item.status === 'failed',
+          )
+        : [],
+    [deliveryQueue, selectedConnector],
+  )
+  const selectedConnectorInspector = useMemo(() => {
+    const profile = getConnectorInspectorProfile(selectedConnector?.name)
+    const latestRun = selectedConnectorRunsWithLead[0] ?? null
+    const liveRetryCount = selectedConnectorFailedDeliveries.length
+
+    return {
+      profile,
+      latestRun,
+      liveRetryCount,
+      runCount: selectedConnectorRuns.length,
+      deliveryCount: selectedConnectorDeliveries.length,
+      downstreamCount: selectedConnectorDeliveries.filter((item) => item.status === 'delivered').length,
+    } as {
+      profile: ConnectorInspectorProfile
+      latestRun: EnrichedLiveTestRun | null
+      liveRetryCount: number
+      runCount: number
+      deliveryCount: number
+      downstreamCount: number
+    }
+  }, [
+    selectedConnector?.name,
+    selectedConnectorRuns.length,
+    selectedConnectorDeliveries,
+    selectedConnectorFailedDeliveries,
+    selectedConnectorRunsWithLead,
+  ])
+  const selectedConnectorBranchTrace = useMemo(() => {
+    const profile = selectedConnectorInspector.profile
+    const latestRun = selectedConnectorInspector.latestRun
+    const latestDelivery = selectedConnectorDeliveries[0] ?? null
+    const activeLeadLabel = activeLead?.handle ?? selectedConnectorDeliveries[0]?.target ?? 'No active lead'
+
+    return [
+      {
+        label: 'Trigger',
+        value: profile.trigger,
+        note: `${selectedConnector?.name ?? 'Connector'} selected for ${activeLeadLabel}.`,
+      },
+      {
+        label: 'Filter',
+        value: profile.branch,
+        note: latestRun
+          ? `${latestRun.scenarioTitle} • ${latestRun.stepLabel}`
+          : 'No replay run has hit this path yet.',
+      },
+      {
+        label: 'Action',
+        value: latestDelivery
+          ? `${latestDelivery.payloadLabel} • ${latestDelivery.status}`
+          : 'No outbox row has been recorded yet.',
+        note: latestDelivery ? latestDelivery.note : 'Replay is waiting on a delivery mutation.',
+      },
+      {
+        label: 'Downstream',
+        value: profile.downstream,
+        note:
+          latestRun?.resultMessage ??
+          'The selected run has not produced a replay result yet.',
+      },
+    ]
+  }, [activeLead?.handle, selectedConnector?.name, selectedConnectorDeliveries, selectedConnectorInspector])
+  const selectedConnectorFailureTrail = useMemo(
+    () =>
+      selectedConnectorFailedDeliveries.map((item) => ({
+        id: item.id,
+        title: item.payloadLabel,
+        detail: `${item.channel} • ${item.target}`,
+        note: item.note,
+      })),
+    [selectedConnectorFailedDeliveries],
   )
   const revenueFollowUps = useMemo(() => {
     const items: Array<{
@@ -961,7 +1657,6 @@ function App() {
       liveTestRuns.length,
       queueRecords.length,
       reportsOverview,
-      repoModules.length,
     ],
   )
   const executionRecipes = useMemo(
@@ -1145,101 +1840,6 @@ if status == no-show:
 
   useEffect(() => {
     void bootstrapSession()
-  }, [bootstrapSession])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    if (window.location.pathname !== '/auth/callback') {
-      return
-    }
-
-    const finalizeOauth = async () => {
-      setAuthPending(true)
-      setApiError(null)
-      setAuthStatus('checking')
-
-      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-      const queryParams = new URLSearchParams(window.location.search)
-      const accessToken = hashParams.get('access_token') || queryParams.get('access_token') || ''
-      const errorDescription =
-        queryParams.get('error_description') ||
-        hashParams.get('error_description') ||
-        queryParams.get('error') ||
-        hashParams.get('error') ||
-        ''
-
-      if (!accessToken) {
-        setAuthPending(false)
-        setAuthStatus('auth_required')
-        setApiError(errorDescription || 'OAuth callback did not return an access token.')
-        window.history.replaceState({}, '', '/')
-        return
-      }
-
-      try {
-        const result = await createOauthSession(accessToken)
-        setAuthSession(result.session)
-        setAuthStatus('authenticated')
-        setRuntimeStatus('loading')
-        window.localStorage.setItem(OAUTH_SESSION_EVENT, String(Date.now()))
-        if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({ type: OAUTH_SESSION_EVENT }, window.location.origin)
-        }
-        window.history.replaceState({}, '', '/')
-        if (window.opener && !window.opener.closed) {
-          window.close()
-        }
-      } catch (error) {
-        clearLiveConsoleState()
-        setAuthSession(null)
-        setAuthStatus('auth_required')
-        setApiError(error instanceof Error ? error.message : 'OAuth login failed.')
-        window.history.replaceState({}, '', '/')
-      } finally {
-        setAuthPending(false)
-      }
-    }
-
-    void finalizeOauth()
-  }, [clearLiveConsoleState])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const refreshSession = () => {
-      startTransition(() => {
-        void bootstrapSession()
-      })
-    }
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
-        return
-      }
-
-      if (event.data?.type === OAUTH_SESSION_EVENT) {
-        refreshSession()
-      }
-    }
-
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === OAUTH_SESSION_EVENT && event.newValue) {
-        refreshSession()
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    window.addEventListener('storage', handleStorage)
-
-    return () => {
-      window.removeEventListener('message', handleMessage)
-      window.removeEventListener('storage', handleStorage)
-    }
   }, [bootstrapSession])
 
   useEffect(() => {
@@ -1460,7 +2060,7 @@ if status == no-show:
         'sync.pushed',
         'sync.pulled',
         'sync.remote_changed',
-        'sync.mirror_updated',
+        'sync.supabase_updated',
       ].forEach((eventName) => {
         stream?.addEventListener(eventName, refreshState)
       })
@@ -1506,6 +2106,7 @@ if status == no-show:
     deliveryQueue?: DeliveryItem[]
     operatorNotesHistory?: OperatorNote[]
     auditEvents?: AuditEvent[]
+    integrationEvents?: IntegrationEvent[]
     liveTestRuns?: LiveTestRun[]
     ruleTestResults?: Record<string, RuleTestResult>
     dashboard?: {
@@ -1542,6 +2143,9 @@ if status == no-show:
     }
     if (snapshot.auditEvents) {
       setAuditEvents(snapshot.auditEvents)
+    }
+    if (snapshot.integrationEvents) {
+      setIntegrationEvents(snapshot.integrationEvents)
     }
     if (snapshot.liveTestRuns) {
       setLiveTestRuns(snapshot.liveTestRuns)
@@ -1592,6 +2196,23 @@ if status == no-show:
       detail: `${nextScenario.title} is now active in replay mode.`,
       target: nextScenario.id,
     })
+  }
+
+  const focusLeadRecord = (lead: QueueLead) => {
+    const phase = deriveLifecyclePhaseFromLead(lead)
+    setSelectedLeadId(lead.id)
+    setScenarioId(inferScenarioIdFromStage(lead.stage))
+    setWorkbenchTab(phase === 'payment' || phase === 'onboarding' ? 'payload' : phase === 'alert' || phase === 'booking' ? 'recovery' : 'funnel')
+    setRailTab(phase === 'payment' ? 'metrics' : phase === 'onboarding' ? 'tools' : phase === 'alert' ? 'audit' : phase === 'booking' ? 'operations' : 'inbox')
+    setStepIndex(0)
+  }
+
+  const focusLifecycleNode = (target: { railTab: RailTab; workbenchTab: WorkbenchTab }) => {
+    if (activeLead) {
+      setSelectedLeadId(activeLead.id)
+    }
+    setRailTab(target.railTab)
+    setWorkbenchTab(target.workbenchTab)
   }
 
   const simulateWebhookFailure = () => {
@@ -1876,9 +2497,62 @@ if status == no-show:
         status: response.ok ? 'accepted' : 'rejected',
         message: response.message,
       })
+      setConnectorActionResult({
+        title: 'Replay active scenario',
+        detail: response.message,
+        kind: 'replay',
+        status: response.ok ? 'accepted' : 'rejected',
+        timestamp: new Date().toISOString(),
+      })
       return
     } catch (error) {
       handleRuntimeFailure(error, 'Live test execution failed.')
+      setWebhookResult({
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Live test execution failed.',
+      })
+      setConnectorActionResult({
+        title: 'Replay active scenario',
+        detail: error instanceof Error ? error.message : 'Live test execution failed.',
+        kind: 'replay',
+        status: 'rejected',
+        timestamp: new Date().toISOString(),
+      })
+      return
+    }
+  }
+
+  const handleRerunConnectorRun = async (run: EnrichedLiveTestRun) => {
+    try {
+      const response = await runLiveTestRequest({
+        scenarioId: run.scenarioId,
+        scenarioTitle: run.scenarioTitle,
+        stepLabel: run.stepLabel,
+        payload: run.payload,
+      })
+      applySnapshot(response.snapshot)
+      markRuntimeReady()
+      setWebhookResult({
+        status: response.ok ? 'accepted' : 'rejected',
+        message: response.message,
+      })
+      setConnectorActionResult({
+        title: 'Replay selected run',
+        detail: response.message,
+        kind: 'replay',
+        status: response.ok ? 'accepted' : 'rejected',
+        timestamp: new Date().toISOString(),
+      })
+      return
+    } catch (error) {
+      handleRuntimeFailure(error, 'Live test execution failed.')
+      setConnectorActionResult({
+        title: 'Replay selected run',
+        detail: error instanceof Error ? error.message : 'Live test execution failed.',
+        kind: 'replay',
+        status: 'rejected',
+        timestamp: new Date().toISOString(),
+      })
       setWebhookResult({
         status: 'rejected',
         message: error instanceof Error ? error.message : 'Live test execution failed.',
@@ -1933,6 +2607,13 @@ if status == no-show:
           status: 'accepted',
           message: response.message ?? 'DM sprint workflow executed.',
         })
+        setConnectorActionResult({
+          title: 'Replay proof flow',
+          detail: response.message ?? 'DM sprint workflow executed.',
+          kind: 'replay',
+          status: 'accepted',
+          timestamp: new Date().toISOString(),
+        })
       }
 
       if (recipeId === 'ghl-recovery' && activeLead) {
@@ -1947,6 +2628,13 @@ if status == no-show:
         setWebhookResult({
           status: 'accepted',
           message: response.message ?? 'No-show recovery workflow executed.',
+        })
+        setConnectorActionResult({
+          title: 'Replay proof flow',
+          detail: response.message ?? 'No-show recovery workflow executed.',
+          kind: 'replay',
+          status: 'accepted',
+          timestamp: new Date().toISOString(),
         })
       }
 
@@ -1963,6 +2651,13 @@ if status == no-show:
           status: 'accepted',
           message: response.message ?? 'Stripe to Meta CAPI workflow executed.',
         })
+        setConnectorActionResult({
+          title: 'Replay proof flow',
+          detail: response.message ?? 'Stripe to Meta CAPI workflow executed.',
+          kind: 'replay',
+          status: 'accepted',
+          timestamp: new Date().toISOString(),
+        })
       }
 
       if (recipeId === 'onboarding' && activeLead) {
@@ -1974,6 +2669,13 @@ if status == no-show:
           status: 'accepted',
           message: response.message ?? 'Onboarding autopilot executed.',
         })
+        setConnectorActionResult({
+          title: 'Replay proof flow',
+          detail: response.message ?? 'Onboarding autopilot executed.',
+          kind: 'replay',
+          status: 'accepted',
+          timestamp: new Date().toISOString(),
+        })
       }
 
       markRuntimeReady()
@@ -1982,6 +2684,13 @@ if status == no-show:
       setWebhookResult({
         status: 'rejected',
         message: error instanceof Error ? error.message : 'Failed to execute the selected proof recipe.',
+      })
+      setConnectorActionResult({
+        title: 'Replay proof flow',
+        detail: error instanceof Error ? error.message : 'Failed to execute the selected proof recipe.',
+        kind: 'replay',
+        status: 'rejected',
+        timestamp: new Date().toISOString(),
       })
     } finally {
       setRecipePending(null)
@@ -2040,7 +2749,7 @@ if status == no-show:
       setWebhookResult({
         status: result.ok ? 'accepted' : 'rejected',
         message: result.ok
-          ? result.message ?? 'Local snapshot pushed to the remote mirror.'
+          ? result.message ?? 'Local snapshot pushed to the repo-owned Supabase state.'
           : result.message ?? 'Local snapshot push failed.',
       })
       await refreshSyncState()
@@ -2405,12 +3114,26 @@ if status == no-show:
       const response = await retryDeliveryRequest(deliveryId)
       applySnapshot(response.snapshot)
       markRuntimeReady()
+      setConnectorActionResult({
+        title: 'Retry delivery',
+        detail: response.message ?? 'Delivery retried successfully.',
+        kind: 'retry',
+        status: 'accepted',
+        timestamp: new Date().toISOString(),
+      })
       return
     } catch (error) {
       handleRuntimeFailure(error, 'Failed to retry the delivery item.')
       setWebhookResult({
         status: 'rejected',
         message: error instanceof Error ? error.message : 'Failed to retry the delivery item.',
+      })
+      setConnectorActionResult({
+        title: 'Retry delivery',
+        detail: error instanceof Error ? error.message : 'Failed to retry the delivery item.',
+        kind: 'retry',
+        status: 'rejected',
+        timestamp: new Date().toISOString(),
       })
       return
     }
@@ -2469,22 +3192,6 @@ if status == no-show:
       setAuthSession(null)
       setAuthStatus('auth_required')
       setLoginPassword('')
-    }
-  }
-
-  const handleOauthLogin = async (provider: 'google' | 'github') => {
-    setOauthProviderPending(provider)
-    setApiError(null)
-
-    try {
-      const { authorizeUrl } = await fetchOauthAuthorizeUrl(provider, window.location.origin)
-      const authWindow = window.open(authorizeUrl, '_blank', 'noopener,noreferrer')
-      if (!authWindow) {
-        window.location.assign(authorizeUrl)
-      }
-    } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Unable to start OAuth login.')
-      setOauthProviderPending(null)
     }
   }
 
@@ -2605,32 +3312,7 @@ if status == no-show:
                 <form className="auth-form" onSubmit={handleLogin}>
                   <div className="auth-heading">
                     <h2>Sign in</h2>
-                    <p>Use a provider or operator credentials.</p>
-                  </div>
-
-                  <div className="auth-providers">
-                    <button
-                      type="button"
-                      className="auth-provider-button"
-                      disabled={authPending}
-                      onClick={() => handleOauthLogin('google')}
-                    >
-                      <ProviderIcon provider="google" />
-                      <span>{oauthProviderPending === 'google' ? 'Opening Google…' : 'Continue with Google'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="auth-provider-button"
-                      disabled={authPending}
-                      onClick={() => handleOauthLogin('github')}
-                    >
-                      <ProviderIcon provider="github" />
-                      <span>{oauthProviderPending === 'github' ? 'Opening GitHub…' : 'Continue with GitHub'}</span>
-                    </button>
-                  </div>
-
-                  <div className="auth-divider auth-divider-tight">
-                    <span>or use operator login</span>
+                    <p>Use operator credentials for this console.</p>
                   </div>
 
                   <label className="auth-field">
@@ -2671,189 +3353,52 @@ if status == no-show:
 
   return (
     <div className="console-shell">
-      <header className="console-header">
-        <div className="console-brand">
+      <header className="console-topbar">
+        <div className="console-topbar-title">
           <div>
             <p className="eyebrow">Creator funnel ops</p>
             <h1>COBE operator console</h1>
           </div>
-          <p className="console-copy">
-            Work a live DM funnel, push checkout handoff, recover no-shows, and validate revenue
-            events from one SQL-backed surface.
-          </p>
+          <p>{runtimeStatus === 'ready' ? 'Cross-system workflow live' : 'Runtime requires attention'}</p>
         </div>
 
-        <div className="header-strip">
-          {missionStats.map((stat, index) => (
-            <article key={stat.label} className={`header-cell header-cell-${index + 1}`}>
-              <p className="stat-label">{stat.label}</p>
-              <p className="header-value">{stat.value}</p>
-              <p className="stat-note">{stat.note}</p>
+        <div className="console-topbar-metrics">
+          {missionStats.slice(0, 3).map((stat) => (
+            <article key={stat.label} className="topbar-metric">
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
             </article>
           ))}
         </div>
 
-        <div className="command-bar">
-          <div className="command-cluster">
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() => handleStepChange(stepIndex - 1)}
-              disabled={stepIndex === 0}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="button button-primary button-small"
-              onClick={() => handleStepChange(stepIndex + 1)}
-              disabled={stepIndex === runtime.stepLabels.length - 1}
-            >
-              Advance
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={() => handleStepChange(0)}
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={handleRuntimeReset}
-              disabled={runtimeResetPending || authStatus !== 'authenticated'}
-            >
-              {runtimeResetPending ? 'Resetting data…' : 'Reset data'}
-            </button>
-            <button
-              type="button"
-              className="button button-primary button-small"
-              onClick={handleInterviewMode}
-              disabled={runtimeResetPending || authStatus !== 'authenticated'}
-            >
-              {interviewMode ? 'Interview mode active' : 'Start interview mode'}
-            </button>
-          </div>
-
-          <div className="command-cluster">
-            <span className={`runtime-chip runtime-chip-${runtimeStatus}`}>
-              {runtimeStatus === 'ready'
-                ? 'Backend live'
-                : runtimeStatus === 'loading'
-                  ? 'Loading runtime'
-                  : runtimeStatus === 'degraded'
-                    ? 'Runtime degraded'
-                    : 'Awaiting session'}
-            </span>
-            <span className="status-pill">
-              {authSession?.bypass ? 'local bypass' : authSession?.sub ?? 'authenticated'}
-            </span>
-            <button
-              type="button"
-              className="button button-primary button-small"
-              onClick={handleRunWorkflow}
-              disabled={!hasLiveLead || !liveConsoleReady}
-            >
-              Run workflow
-            </button>
-            <button
-              type="button"
-              className="button button-warning button-small"
-              onClick={handleRunLiveTest}
-              disabled={!liveConsoleReady}
-            >
-              Run live test
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={handleExport}
-            >
-              Export proof
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={handleLogNote}
-              disabled={!liveConsoleReady}
-            >
-              Log note
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-small"
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
-          </div>
+        <div className="console-topbar-actions">
+          <span className="topbar-status">
+            {runtimeStatus === 'ready'
+              ? 'Backend live'
+              : runtimeStatus === 'loading'
+                ? 'Loading runtime'
+                : runtimeStatus === 'degraded'
+                  ? 'Backend degraded'
+                  : 'Awaiting session'}
+          </span>
+          <button type="button" className="button button-primary button-small" onClick={handleRunLiveTest}>
+            Run live test
+          </button>
+          <button type="button" className="button button-secondary button-small" onClick={handleExport}>
+            Export proof
+          </button>
+          <button type="button" className="button button-secondary button-small" onClick={handleLogout}>
+            Logout
+          </button>
         </div>
-        <section className={`interview-band ${interviewMode ? 'interview-band-active' : ''}`}>
-          <div className="interview-band-copy">
-            <p className="panel-kicker">Interview mode</p>
-            <h2>
-              {interviewMode
-                ? 'Guided narrative is loaded'
-                : 'Interview walkthrough is available'}
-            </h2>
-            <p className="stat-note">
-              {interviewMode
-                ? 'Use the curated step cards to jump between the DM sprint, GHL recovery, integration evidence, revenue board, and proof pack.'
-                : 'Launch guided mode only when you want the interview script and proof path.'}
-            </p>
-          </div>
-          <div className="interview-band-actions">
-            {interviewMode ? <span className="status-pill">{activeInterviewStep.title}</span> : null}
-            {interviewMode ? (
-              <button
-                type="button"
-                className="button button-secondary button-small"
-                onClick={() => focusInterviewStep(activeInterviewStep)}
-                disabled={!liveConsoleReady}
-              >
-                Focus current step
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="button button-primary button-small"
-              onClick={handleInterviewMode}
-              disabled={runtimeResetPending || authStatus !== 'authenticated'}
-            >
-              {runtimeResetPending ? 'Loading…' : interviewMode ? 'Refresh guided mode' : 'Launch guided mode'}
-            </button>
-          </div>
-        </section>
-        {interviewMode ? (
-          <section className="interview-step-grid" aria-label="Interview walkthrough steps">
-            {interviewGuideSteps.map((step, index) => {
-              const isActive = activeInterviewStep.id === step.id
-              return (
-                <button
-                  key={step.id}
-                  type="button"
-                  className={`interview-step-card ${isActive ? 'interview-step-card-active' : ''}`}
-                  onClick={() => focusInterviewStep(step)}
-                >
-                  <div className="section-topline">
-                    <div>
-                      <p className="mini-label">
-                        Step 0{index + 1}
-                        {isActive ? ' • active' : ''}
-                      </p>
-                      <h3>{step.title}</h3>
-                    </div>
-                    <span className="status-pill">{step.workbenchTab}</span>
-                  </div>
-                  <p className="stat-note">{step.detail}</p>
-                  <p className="timeline-meta">{step.skill}</p>
-                </button>
-              )
-            })}
-          </section>
-        ) : null}
       </header>
+
+      {runtimeStatus !== 'ready' && apiError ? (
+        <div className="runtime-banner runtime-banner-degraded">
+          <strong>Runtime attention required</strong>
+          <span>{apiError}</span>
+        </div>
+      ) : null}
 
       <main className="console-grid">
         <aside className="console-panel queue-panel">
@@ -2906,23 +3451,25 @@ if status == no-show:
             {prioritizedLeads.map((lead) => {
               const isActive = lead.id === activeLead?.id
               const priorityLabel = lead.priorityBand
+              const lifecyclePhase = deriveLifecyclePhaseFromLead(lead)
 
               return (
-                  <button
+                <button
                   key={lead.id}
                   type="button"
                   className={`queue-item ${isActive ? 'queue-item-active' : ''}`}
-                  onClick={() => focusScenario(inferScenarioIdFromStage(lead.stage))}
+                  onClick={() => focusLeadRecord(lead)}
                 >
                   <div className="queue-item-topline">
                     <div>
-                      <p className="mini-label">{lead.source}</p>
                       <strong>{lead.name}</strong>
                     </div>
-                    <span className={`signal-badge signal-${priorityLabel}`}>{priorityLabel}</span>
+                    <div className="command-cluster">
+                      <span className={`signal-badge signal-${priorityLabel}`}>{priorityLabel}</span>
+                    </div>
                   </div>
-                  <p className="timeline-meta">
-                    {lead.handle} • {lead.offer} • {lead.stage}
+                  <p className="queue-item-stage">
+                    {lifecyclePhaseLabel(lifecyclePhase)} • {lead.handle}
                   </p>
                   <p className="queue-item-note">{lead.recommendedAction}</p>
                 </button>
@@ -2996,120 +3543,153 @@ if status == no-show:
           ) : null}
 
           <div className="workspace-header">
-            <div className="workspace-title">
-              <p className="panel-kicker">Active workflow</p>
-              <h2>{activeLead?.name ? `${activeLead.name} workflow` : activeScenario.title}</h2>
-              <p className="stat-note">
+            <div className="workspace-header-row">
+              <div className="workspace-title workspace-title-inline">
+                <p className="panel-kicker">Active workflow</p>
+                <h2>{activeLead?.name ? `${activeLead.name} workflow` : activeScenario.title}</h2>
+              </div>
+
+              <p className="stat-note workspace-next-action">
                 {activeLead?.nextAction ??
                   'No live workflow state is available until the backend returns an authenticated queue record.'}
               </p>
             </div>
 
-            <div className="workspace-status">
-              <div className="status-block status-block-cyan">
-                <p className="mini-label">Current step</p>
+            <div className="workspace-summary-strip workspace-summary-strip-compact">
+              <div className="workspace-summary-item">
+                <span>Step</span>
                 <strong>{runtime.stepLabels[stepIndex]}</strong>
-                <p>{`Tab ${workbenchTab} • ${runtime.leadStages[stepIndex]}`}</p>
+                <p>
+                  {runtime.leadStages[stepIndex]} · {stepIndex + 1}/{runtime.stepLabels.length}
+                </p>
               </div>
-              <div className="status-block status-block-amber">
-                <p className="mini-label">{runtime.metricLabel}</p>
+              <div className="workspace-summary-item">
+                <span>{runtime.metricLabel}</span>
                 <strong>{activeMetricValue}</strong>
                 <p>{activeLeadQueue[0]?.payloadLabel ?? activeScenario.revenueAngle}</p>
               </div>
-              <div className="status-block status-block-green">
-                <p className="mini-label">Operator target</p>
+              <div className="workspace-summary-item">
+                <span>Operator target</span>
                 <strong>{activeLead?.handle ?? 'No live lead loaded'}</strong>
                 <p>{activeLead?.owner ? `Owner ${activeLead.owner}` : 'Owner unassigned'}</p>
               </div>
-            </div>
-
-            <div className="workflow-track">
-              <div className="workflow-track-topline">
-                <span className="status-pill">
-                  Step {stepIndex + 1}/{runtime.stepLabels.length}
-                </span>
-                <span className="timeline-meta">
-                  {activeLeadQueue.length ? `${activeLeadQueue.length} live relays` : `${activeScenario.hoursSaved} reclaimed`}
-                </span>
-              </div>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress}%` }} />
+              <div className="workflow-track">
+                <span>Flow status</span>
+                <strong>{activeLeadQueue.length ? `${activeLeadQueue.length} live relays` : activeScenario.hoursSaved}</strong>
+                <p>{activeLeadQueue.length ? 'Lead-linked activity live' : 'Time reclaimed across the branch'}</p>
               </div>
             </div>
 
-            <section className="scenario-replay-band" aria-label="Scenario replay lab">
-              <div className="section-topline">
-                <div>
-                  <p className="panel-kicker">Replay lab</p>
-                  <h3>Success and failure branches</h3>
+            <section className="lifecycle-strip" aria-label="Lead lifecycle graph">
+              <div className="section-topline lifecycle-strip-topline">
+                <div className="lifecycle-strip-copy">
+                  <p className="panel-kicker">Lifecycle graph</p>
+                  <h3>Integration-driven lead journey</h3>
                 </div>
-                <div className="command-cluster">
-                  <span className="timeline-meta">Replayable scenarios from live state</span>
+                <span className="timeline-meta">
+                  {activeLeadLifecycleNodes.length
+                    ? `${activeLeadLifecycleNodes.length} lead-linked events`
+                    : 'Waiting for a lead-linked integration event'}
+                </span>
+              </div>
+              <div className="lifecycle-grid">
+                {activeLeadLifecycleNodes.length ? (
+                  activeLeadLifecycleNodes.map((node) => (
+                    <article
+                      key={node.id}
+                      className={`surface-card surface-card-tight lifecycle-node lifecycle-node-${node.phase}`}
+                      title={node.effect ?? node.summary}
+                    >
+                      <div className="section-topline">
+                        <div className="lifecycle-node-copy lifecycle-node-copy-primary">
+                          <span className="mini-label">{node.phase}</span>
+                          <h4>{node.title}</h4>
+                          <span className="timeline-meta lifecycle-node-meta">
+                            {node.source} • {node.timestamp}
+                          </span>
+                        </div>
+                        <div className="command-cluster">
+                          <span className={`connector-status ${getIntegrationInboxStatusClass(node.status)}`}>
+                            {node.status}
+                          </span>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => focusLifecycleNode(node.target)}
+                          >
+                            {node.target.label}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="timeline-meta">
+                    Select a live lead to see the shared integration events that shape the lifecycle graph.
+                  </p>
+                )}
+              </div>
+            </section>
+
+            <details className="scenario-replay-band" aria-label="Scenario replay lab">
+              <summary className="deferred-workflow-summary">
+                <span>Replay lab</span>
+                <span className="timeline-meta">Success and failure branches</span>
+              </summary>
+              <div className="deferred-workflow-content">
+                <div className="scenario-replay-grid">
+                  {demoScenarios.map((scenario) => {
+                    const isActive = scenario.id === activeScenario.id
+                    const branchLabel = scenario.id === 'scenario-002' ? 'failure branch' : 'success branch'
+
+                    return (
+                      <button
+                        key={scenario.id}
+                        type="button"
+                        className={`surface-tile scenario-replay-card ${isActive ? 'surface-tile-active scenario-replay-card-active' : ''}`}
+                        onClick={() => focusScenario(scenario.id)}
+                      >
+                        <div className="section-topline">
+                          <div>
+                            <p className="mini-label">{branchLabel}</p>
+                            <h3>{scenario.title}</h3>
+                          </div>
+                          <span className="status-pill">{scenario.leadId}</span>
+                        </div>
+                        <p className="stat-note">{scenario.outcome}</p>
+                        <p className="timeline-meta">{scenario.hoursSaved}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="command-cluster scenario-sim-controls">
                   <button
                     type="button"
                     className="button button-secondary button-small"
-                    onClick={() => setReplayExpanded((current) => !current)}
+                    onClick={simulateWebhookFailure}
+                    disabled={!liveConsoleReady}
                   >
-                    {replayExpanded ? 'Hide replay' : 'Show replay'}
+                    Simulate webhook failure
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={simulateSyncDrift}
+                    disabled={!liveConsoleReady}
+                  >
+                    Simulate sync drift
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={simulateOnboardingFailure}
+                    disabled={!liveConsoleReady}
+                  >
+                    Simulate onboarding issue
                   </button>
                 </div>
               </div>
-              {replayExpanded ? (
-                <>
-                  <div className="scenario-replay-grid">
-                    {demoScenarios.map((scenario) => {
-                      const isActive = scenario.id === activeScenario.id
-                      const branchLabel = scenario.id === 'scenario-002' ? 'failure branch' : 'success branch'
-
-                      return (
-                        <button
-                          key={scenario.id}
-                          type="button"
-                          className={`scenario-replay-card ${isActive ? 'scenario-replay-card-active' : ''}`}
-                          onClick={() => focusScenario(scenario.id)}
-                        >
-                          <div className="section-topline">
-                            <div>
-                              <p className="mini-label">{branchLabel}</p>
-                              <h3>{scenario.title}</h3>
-                            </div>
-                            <span className="status-pill">{scenario.leadId}</span>
-                          </div>
-                          <p className="stat-note">{scenario.outcome}</p>
-                          <p className="timeline-meta">{scenario.hoursSaved}</p>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div className="command-cluster scenario-sim-controls">
-                    <button
-                      type="button"
-                      className="button button-secondary button-small"
-                      onClick={simulateWebhookFailure}
-                      disabled={!liveConsoleReady}
-                    >
-                      Simulate webhook failure
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-secondary button-small"
-                      onClick={simulateSyncDrift}
-                      disabled={!liveConsoleReady}
-                    >
-                      Simulate sync drift
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-secondary button-small"
-                      onClick={simulateOnboardingFailure}
-                      disabled={!liveConsoleReady}
-                    >
-                      Simulate onboarding issue
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </section>
+            </details>
 
             {webhookResult ? (
               <div
@@ -3183,7 +3763,7 @@ if status == no-show:
                 </div>
               </section>
 
-              <section className="stage-stack">
+              <aside className="workspace-actions-rail">
                 <article className="stage-panel">
                   <div className="section-topline">
                     <div>
@@ -3236,7 +3816,7 @@ if status == no-show:
                       <h3>Flow controls</h3>
                     </div>
                   </div>
-                  <div className="action-grid">
+                  <div className="action-list">
                     <button
                       type="button"
                       className="button button-secondary button-small"
@@ -3279,7 +3859,7 @@ if status == no-show:
                     </button>
                   </div>
                 </article>
-              </section>
+              </aside>
             </div>
           ) : null}
 
@@ -3299,34 +3879,29 @@ if status == no-show:
 
                 <p className="booking-owner">Closer: {activeLead?.owner ?? 'Unassigned'}</p>
                 <p className="booking-copy">
-                  {activeBooking?.recoveryAction ??
+                  {activeRoutingDecision.note ??
                     'Payment path skips call handling and moves directly into onboarding automation.'}
                 </p>
 
-                <div className="timeline-stack">
-                  {activeLeadTimeline.map((entry) => (
-                    <article key={entry.id} className="timeline-card">
-                      <div className="section-topline">
-                        <div>
-                          <p className="event-name">{entry.title}</p>
-                          <p className="timeline-meta">
-                            {entry.type} • {entry.timestamp}
-                          </p>
+                <p className="mini-label">GHL pipeline model</p>
+                <div className="pipeline-model">
+                  {activeGhlPipeline.length === 0 ? (
+                    <p className="timeline-meta">Load a live lead to view its GHL pipeline state model.</p>
+                  ) : (
+                    activeGhlPipeline.map((entry) => (
+                      <article key={entry.id} className={`pipeline-state pipeline-state-${entry.state}`}>
+                        <div className="section-topline">
+                          <p className="pipeline-state-label">{entry.label}</p>
+                          <span className={`status-pill status-${entry.state}`}>{entry.state}</span>
                         </div>
-                        <span className={`event-status event-${entry.type}`}>{entry.type}</span>
-                      </div>
-                      <p>{entry.detail}</p>
-                    </article>
-                  ))}
-                  {activeLeadTimeline.length === 0 ? (
-                    <p className="timeline-meta">
-                      Timeline events remain empty until the backend returns an authenticated workflow history.
-                    </p>
-                  ) : null}
+                        <p className="booking-copy">{entry.summary}</p>
+                      </article>
+                    ))
+                  )}
                 </div>
               </section>
 
-              <section className="stage-stack">
+              <aside className="workspace-actions-rail">
                 <article className="stage-panel">
                   <div className="section-topline">
                     <div>
@@ -3348,6 +3923,60 @@ if status == no-show:
                 <article className="stage-panel">
                   <div className="section-topline">
                     <div>
+                      <p className="mini-label">Routing + escalation</p>
+                      <h3>Routing visibility</h3>
+                    </div>
+                    <span className={`signal-badge ${isNoShowEscalationLive ? 'signal-critical' : 'signal-watch'}`}>
+                      {isNoShowEscalationLive ? 'Escalation active' : 'No-show waiting'}
+                    </span>
+                  </div>
+                  <div className="routing-grid">
+                    <article className="routing-card">
+                      <p className="mini-label">Owner</p>
+                      <p className="booking-copy">{activeRoutingDecision.owner}</p>
+                    </article>
+                    <article className="routing-card">
+                      <p className="mini-label">Lane</p>
+                      <p className="booking-copy">{activeRoutingDecision.lane}</p>
+                    </article>
+                    <article className="routing-card">
+                      <p className="mini-label">Rule</p>
+                      <p className="booking-copy">{activeRoutingDecision.ruleLabel}</p>
+                    </article>
+                  </div>
+                  <p className="booking-copy">{noShowEscalationText}</p>
+                  {noShowEscalationSignals.length === 0 ? null : (
+                    <ul className="recovery-signal-list">
+                      {noShowEscalationSignals.map((signal) => (
+                        <li key={signal.id} className={`recovery-signal recovery-signal-${signal.kind}`}>
+                          <div className="section-topline">
+                            <p>{signal.title}</p>
+                            <span
+                              className={`signal-badge ${
+                                signal.kind === 'booking'
+                                  ? 'signal-critical'
+                                  : signal.kind === 'delivery'
+                                    ? 'signal-watch'
+                                    : signal.kind === 'audit'
+                                      ? 'signal-hot'
+                                      : 'signal-normal'
+                              }`}
+                            >
+                              {signal.kind}
+                            </span>
+                          </div>
+                          <p className="timeline-meta">
+                            {signal.timestamp} • {signal.detail}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+
+                <article className="stage-panel">
+                  <div className="section-topline">
+                    <div>
                       <p className="mini-label">Triggered events</p>
                       <h3>Active automation trail</h3>
                     </div>
@@ -3359,20 +3988,42 @@ if status == no-show:
                       </span>
                     ))}
                   </div>
+                  <div className="timeline-stack">
+                    {activeLeadTimeline.length === 0 ? (
+                      <p className="timeline-meta">
+                        Timeline events remain empty until the backend returns an authenticated workflow history.
+                      </p>
+                    ) : (
+                      activeLeadTimeline.slice(0, 3).map((entry) => (
+                        <article key={entry.id} className="timeline-card">
+                          <div className="section-topline">
+                            <div>
+                              <p className="event-name">{entry.title}</p>
+                              <p className="timeline-meta">
+                                {entry.type} • {entry.timestamp}
+                              </p>
+                            </div>
+                            <span className={`event-status event-${entry.type}`}>{entry.type}</span>
+                          </div>
+                          <p>{entry.detail}</p>
+                        </article>
+                      ))
+                    )}
+                  </div>
                 </article>
-              </section>
+              </aside>
             </div>
           ) : null}
 
           {workbenchTab === 'payload' ? (
             <div className="stage-layout stage-layout-payload">
               <section className="stage-panel stage-panel-primary">
-                <div className="section-topline">
-                  <div>
+                <div className="payload-header">
+                  <div className="payload-header-copy">
                     <p className="mini-label">Meta / Stripe payload lab</p>
                     <h3>Webhook editor</h3>
                   </div>
-                  <div className="command-cluster">
+                  <div className="command-cluster payload-toolbar">
                     <button
                       type="button"
                       className="button button-secondary button-small"
@@ -3408,7 +4059,7 @@ if status == no-show:
                 ) : null}
               </section>
 
-              <section className="stage-stack">
+              <aside className="workspace-actions-rail">
                 <article className="stage-panel">
                   <div className="section-topline">
                     <div>
@@ -3467,65 +4118,181 @@ if status == no-show:
                     ))}
                   </div>
                 </article>
-              </section>
+              </aside>
             </div>
           ) : null}
 
-          <section className="notes-panel">
-            <div className="section-topline">
-              <div>
-                <p className="mini-label">Operator notes</p>
-                <h3>Working memory</h3>
-              </div>
-              <div className="command-cluster">
-                <span className="timeline-meta">Persisted locally</span>
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={() => setNotesExpanded((current) => !current)}
-                >
-                  {notesExpanded ? 'Hide notes' : 'Show notes'}
-                </button>
-              </div>
-            </div>
-            {notesExpanded ? (
-              <textarea
-                className="notes-editor"
-                value={operatorNotes}
-                onChange={(event) => setOperatorNotes(event.target.value)}
-                placeholder="Capture blockers, account-specific mapping, or deployment notes."
-              />
-            ) : null}
-          </section>
         </section>
 
-        <aside className="console-panel systems-panel">
-          <div className="section-topline">
-            <div>
-              <p className="panel-kicker">Systems rail</p>
-              <h2>Relays and intelligence</h2>
+        <article
+          className="console-panel systems-panel systems-panel-deferred"
+          hidden={secondaryPanel !== 'systems'}
+        >
+          <div className="secondary-panel-navbar">
+            <div className="workspace-tabs rail-tabs secondary-switcher-row">
+              {[
+                ['inbox', 'Inbox'],
+                ['operations', 'Ops'],
+                ['audit', 'Audit'],
+                ['automation', 'Rules'],
+                ['metrics', 'Metrics'],
+                ['tools', 'Tools'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`tab-button ${railTab === value ? 'tab-button-active' : ''}`}
+                  onClick={() => setRailTab(value as RailTab)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <span className="status-pill">{railTab}</span>
+            <span className="status-pill">{railTab} view</span>
           </div>
 
-          <div className="workspace-tabs rail-tabs">
-            {[
-              ['operations', 'Ops'],
-              ['audit', 'Audit'],
-              ['automation', 'Rules'],
-              ['metrics', 'Metrics'],
-              ['tools', 'Tools'],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`tab-button ${railTab === value ? 'tab-button-active' : ''}`}
-                onClick={() => setRailTab(value as RailTab)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {railTab === 'inbox' ? (
+            <div className="rail-stack">
+              <div className="filters">
+                <input
+                  className="audit-search"
+                  type="search"
+                  value={inboxQuery}
+                  onChange={(event) => setInboxQuery(event.target.value)}
+                  placeholder="Search integration events"
+                />
+                <select
+                  className="audit-select"
+                  value={inboxKindFilter}
+                  onChange={(event) => setInboxKindFilter(event.target.value as 'all' | IntegrationInboxKind)}
+                >
+                  <option value="all">All types</option>
+                  <option value="delivery">Delivery</option>
+                  <option value="audit">Audit</option>
+                  <option value="test">Test run</option>
+                  <option value="webhook">Webhook</option>
+                  <option value="booking">Booking</option>
+                  <option value="onboarding">Onboarding</option>
+                </select>
+              </div>
+
+              <div className="integration-inbox-summary">
+                <article className="surface-card surface-card-tight integration-inbox-summary-card">
+                  <p className="metric-label">Inbox items</p>
+                  <p className="metric-value">{visibleInboxEntries.length}</p>
+                  <p className="metric-delta">{integrationInboxEntries.length} total in the shared flow</p>
+                </article>
+                <article className="surface-card surface-card-tight integration-inbox-summary-card">
+                  <p className="metric-label">Queued or processing</p>
+                  <p className="metric-value">
+                    {visibleInboxEntries.filter((entry) => entry.status === 'queued' || entry.status === 'processing').length}
+                  </p>
+                  <p className="metric-delta">Work still moving through integrations.</p>
+                </article>
+                <article className="surface-card surface-card-tight integration-inbox-summary-card">
+                  <p className="metric-label">Warnings</p>
+                  <p className="metric-value">{visibleInboxEntries.filter((entry) => entry.status === 'warning').length}</p>
+                  <p className="metric-delta">Items that need operator attention.</p>
+                </article>
+                <article className="surface-card surface-card-tight integration-inbox-summary-card">
+                  <p className="metric-label">Sources</p>
+                  <p className="metric-value">{integrationInboxSources.length - 1}</p>
+                  <p className="metric-delta">Distinct connectors and event sources.</p>
+                </article>
+              </div>
+
+              {activeLead ? (
+                <article className="surface-card surface-card-standard integration-inbox-focus">
+                  <div className="section-topline">
+                    <div>
+                      <p className="mini-label">Active lead trail</p>
+                      <h3>{activeLead.name}</h3>
+                    </div>
+                    <span className="timeline-meta">{activeLeadInboxEntries.length} matched</span>
+                  </div>
+                  <div className="integration-inbox-list">
+                    {(activeLeadInboxEntries.slice(0, 3).length ? activeLeadInboxEntries.slice(0, 3) : visibleInboxEntries.slice(0, 3)).map((entry) => (
+                      <article key={entry.id} className="surface-card surface-card-tight integration-inbox-card">
+                        <div className="section-topline">
+                          <div>
+                            <p className="event-name">{entry.source}</p>
+                            <p className="timeline-meta">
+                              {entry.kind} • {entry.target}
+                            </p>
+                          </div>
+                          <span className={`connector-status ${getIntegrationInboxStatusClass(entry.status)}`}>
+                            {entry.status}
+                          </span>
+                        </div>
+                        <p>{entry.summary}</p>
+                        {entry.effect ? <p className="timeline-meta">{entry.effect}</p> : null}
+                        <p className="timeline-meta">{entry.timestamp}</p>
+                      </article>
+                    ))}
+                  </div>
+                </article>
+              ) : null}
+
+              <article className="rail-module rail-module-slate">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Integration inbox</p>
+                    <h3>Shared event stream</h3>
+                  </div>
+                  <select
+                    className="audit-select"
+                    value={inboxStatusFilter}
+                    onChange={(event) => setInboxStatusFilter(event.target.value as 'all' | IntegrationInboxStatus)}
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="queued">Queued</option>
+                    <option value="processing">Processing</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                    <option value="processed">Processed</option>
+                    <option value="warning">Warning</option>
+                  </select>
+                </div>
+                <div className="integration-inbox-list">
+                  {visibleInboxEntries.length ? (
+                    visibleInboxEntries.slice(0, 10).map((entry) => (
+                      <article key={entry.id} className="surface-card surface-card-standard integration-inbox-card">
+                        <div className="section-topline">
+                          <div>
+                            <p className="event-name">{entry.source}</p>
+                            <p className="timeline-meta">
+                              {entry.kind} • {entry.target}
+                            </p>
+                          </div>
+                          <span className={`connector-status ${getIntegrationInboxStatusClass(entry.status)}`}>
+                            {entry.status}
+                          </span>
+                        </div>
+                        <p>{entry.summary}</p>
+                        {entry.effect ? <p className="timeline-meta">{entry.effect}</p> : null}
+                        <div className="queue-card-footer">
+                          <p className="timeline-meta">{entry.timestamp}</p>
+                          {entry.leadId ? (
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => setSelectedLeadId(entry.leadId ?? '')}
+                            >
+                              Focus lead
+                            </button>
+                          ) : (
+                            <span className="timeline-meta">No lead target</span>
+                          )}
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="timeline-meta">No integration events match the current filters.</p>
+                  )}
+                </div>
+              </article>
+            </div>
+          ) : null}
 
           {railTab === 'operations' ? (
             <div className="rail-stack">
@@ -3579,7 +4346,7 @@ if status == no-show:
                 </select>
                 <div className="queue-grid">
                   {(activeLeadQueue.length ? activeLeadQueue : prioritizedDeliveryQueue).map((item) => (
-                    <article key={item.id} className="queue-card">
+                    <article key={item.id} className="surface-card surface-card-standard queue-card">
                       <div className="section-topline">
                         <div>
                           <p className="event-name">{item.payloadLabel}</p>
@@ -3612,13 +4379,13 @@ if status == no-show:
                     <h3>Live integrations</h3>
                   </div>
                 </div>
-                <div className="connector-grid">
+                <div className="connector-grid connector-grid-single-column">
                   {automationConnectors.map((connector) => {
                     const state = connectorStates[connector.name]
                     const report = reportsOverview?.connectors.find((entry) => entry.name === connector.name)
 
                     return (
-                      <article key={connector.name} className="connector-card">
+                      <article key={connector.name} className="surface-card surface-card-standard connector-card">
                         <div className="section-topline">
                           <div>
                             <p className="mini-label">{connector.category}</p>
@@ -3634,7 +4401,7 @@ if status == no-show:
                             {report.queued} queued • {report.processing} processing • {report.delivered} delivered
                           </p>
                         ) : null}
-                        <div className="queue-card-footer">
+                        <div className="queue-card-footer queue-card-footer-stacked">
                           <p className="timeline-meta">
                             {state?.lastPing ?? 'live state unavailable'} • {state?.runs ?? 0} runs
                           </p>
@@ -3821,7 +4588,7 @@ if status == no-show:
                       <button
                         key={connector.name}
                         type="button"
-                        className={`connector-selector ${isActive ? 'connector-selector-active' : ''}`}
+                        className={`surface-tile connector-selector ${isActive ? 'surface-tile-active connector-selector-active' : ''}`}
                         onClick={() => setSelectedConnectorName(connector.name)}
                       >
                         <strong>{connector.name}</strong>
@@ -3832,10 +4599,10 @@ if status == no-show:
                 </div>
 
                 <div className="integration-evidence-grid">
-                  <article className="evidence-card evidence-card-primary">
+                  <article className="surface-card surface-card-standard evidence-card evidence-card-primary">
                     <div className="section-topline">
                       <div>
-                        <p className="mini-label">Current connector</p>
+                        <p className="mini-label">Run inspector</p>
                         <h3>{selectedConnector?.name ?? 'Unknown connector'}</h3>
                       </div>
                       <span className={`connector-status connector-${selectedConnectorState?.status ?? 'attention'}`}>
@@ -3843,6 +4610,29 @@ if status == no-show:
                       </span>
                     </div>
                     <p>{selectedConnector?.use ?? 'No connector description available.'}</p>
+                    <div className="evidence-metrics">
+                      <article>
+                        <p className="metric-label">Trigger</p>
+                        <p className="metric-value">{selectedConnectorInspector.profile.trigger}</p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Branch</p>
+                        <p className="metric-value">{selectedConnectorInspector.profile.branch}</p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Latest run</p>
+                        <p className="metric-value">
+                          {selectedConnectorInspector.latestRun
+                            ? selectedConnectorInspector.latestRun.status
+                            : 'none'}
+                        </p>
+                      </article>
+                      <article>
+                        <p className="metric-label">Retries</p>
+                        <p className="metric-value">{selectedConnectorInspector.liveRetryCount}</p>
+                      </article>
+                    </div>
+                    <p className="timeline-meta">{selectedConnectorInspector.profile.downstream}</p>
                     <div className="evidence-metrics">
                       <article>
                         <p className="metric-label">Runs</p>
@@ -3861,31 +4651,111 @@ if status == no-show:
                         <p className="metric-value">{selectedConnectorReport?.delivered ?? 0}</p>
                       </article>
                     </div>
+                    <div className="branch-trace">
+                      <div className="section-topline">
+                        <div>
+                          <p className="mini-label">Branch trace</p>
+                          <h4>How the run moved</h4>
+                        </div>
+                        <span className="timeline-meta">4-step path</span>
+                      </div>
+                      <div className="branch-trace-grid">
+                        {selectedConnectorBranchTrace.map((step) => (
+                          <article key={step.label} className="branch-trace-step">
+                            <p className="metric-label">{step.label}</p>
+                            <strong>{step.value}</strong>
+                            <p className="timeline-meta">{step.note}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                    {connectorActionResult ? (
+                      <article className="branch-trace connector-action-result">
+                        <div className="section-topline">
+                          <div>
+                            <p className="mini-label">
+                              {connectorActionResult.kind === 'retry' ? 'Retry result' : 'Replay result'}
+                            </p>
+                            <h4>{connectorActionResult.title}</h4>
+                          </div>
+                          <span className={`connector-status connector-${connectorActionResult.status}`}>
+                            {connectorActionResult.status}
+                          </span>
+                        </div>
+                        <p>{connectorActionResult.detail}</p>
+                        <p className="timeline-meta">{connectorActionResult.timestamp}</p>
+                      </article>
+                    ) : null}
+                    {selectedConnectorFailureTrail.length ? (
+                      <div className="branch-trace">
+                        <div className="section-topline">
+                          <div>
+                            <p className="mini-label">Failure trail</p>
+                            <h4>Failed runs waiting on a retry</h4>
+                          </div>
+                          <span className="timeline-meta">{selectedConnectorFailureTrail.length} failures</span>
+                        </div>
+                        <div className="branch-trace-grid">
+                          {selectedConnectorFailureTrail.map((item) => (
+                            <article key={item.id} className="branch-trace-step">
+                              <p className="metric-label">{item.title}</p>
+                              <strong>{item.detail}</strong>
+                              <p className="timeline-meta">{item.note}</p>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     <p className="timeline-meta">
                       Last ping: {selectedConnectorState?.lastPing ?? 'unavailable'} • {selectedConnectorState?.note ?? 'No connector state yet.'}
                     </p>
-                    <button
-                      type="button"
-                      className="button button-secondary button-small"
-                      onClick={() => selectedConnector && handleConnectorPing(selectedConnector.name)}
-                      disabled={!liveConsoleReady || !selectedConnectorState}
-                    >
-                      Ping selected connector
-                    </button>
+                    <div className="command-cluster">
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => selectedConnector && handleConnectorPing(selectedConnector.name)}
+                        disabled={!liveConsoleReady || !selectedConnectorState}
+                      >
+                        Ping selected connector
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={handleRunLiveTest}
+                        disabled={!liveConsoleReady}
+                      >
+                        Replay active scenario
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        onClick={() => handleRunRecipe(selectedConnectorInspector.profile.replayRecipe)}
+                        disabled={
+                          !liveConsoleReady ||
+                          (selectedConnectorInspector.profile.replayRecipe !== 'dm-sprint' && !hasLiveLead)
+                        }
+                      >
+                        Replay proof flow
+                      </button>
+                    </div>
                   </article>
 
-                  <article className="evidence-card">
+                  <article className="surface-card surface-card-standard evidence-card">
                     <div className="section-topline">
                       <div>
                         <p className="mini-label">Replay history</p>
                         <h3>Latest test runs</h3>
                       </div>
-                      <span className="timeline-meta">{selectedConnectorRuns.length} shown</span>
+                      <span className="timeline-meta">{selectedConnectorRunsWithLead.length} shown</span>
                     </div>
                     <div className="evidence-list">
-                      {selectedConnectorRuns.length ? (
-                        selectedConnectorRuns.map((run) => (
-                          <article key={run.id} className="evidence-item">
+                      {selectedConnectorRunsWithLead.length ? (
+                        selectedConnectorRunsWithLead.map((run) => {
+                          const linkedLead =
+                            run.leadId !== undefined ? leadRecords.find((entry) => entry.id === run.leadId) : null
+
+                          return (
+                          <article key={run.id} className="surface-card surface-card-tight evidence-item">
                             <div className="section-topline">
                               <div>
                                 <p className="event-name">{run.payloadLabel}</p>
@@ -3896,16 +4766,46 @@ if status == no-show:
                               <span className={`connector-status connector-${run.status}`}>{run.status}</span>
                             </div>
                             <p className="timeline-meta">{run.resultMessage}</p>
+                            {run.leadId || linkedLead ? (
+                              <p className="timeline-meta">
+                                {linkedLead
+                                  ? `Lead: ${linkedLead.name} • ${linkedLead.handle}`
+                                  : `Run lead match: ${run.leadId}`}
+                              </p>
+                            ) : null}
                             <pre className="proof-preview evidence-preview">{run.payload}</pre>
+                            <div className="queue-card-footer">
+                              <p className="timeline-meta">{run.createdAt}</p>
+                              <div className="command-cluster">
+                                {run.leadId ? (
+                                  <button
+                                    type="button"
+                                    className="button button-secondary button-small"
+                                    onClick={() => setSelectedLeadId(run.leadId ?? '')}
+                                  >
+                                    Focus lead
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="button button-primary button-small"
+                                  onClick={() => handleRerunConnectorRun(run)}
+                                  disabled={!liveConsoleReady}
+                                >
+                                  Replay run
+                                </button>
+                              </div>
+                            </div>
                           </article>
-                        ))
+                          )
+                        })
                       ) : (
                         <p className="timeline-meta">No replay runs are recorded for this connector yet.</p>
                       )}
                     </div>
                   </article>
 
-                  <article className="evidence-card">
+                  <article className="surface-card surface-card-standard evidence-card">
                     <div className="section-topline">
                       <div>
                         <p className="mini-label">Delivery trail</p>
@@ -3916,7 +4816,7 @@ if status == no-show:
                     <div className="evidence-list">
                       {selectedConnectorDeliveries.length ? (
                         selectedConnectorDeliveries.map((item) => (
-                          <article key={item.id} className="evidence-item">
+                          <article key={item.id} className="surface-card surface-card-tight evidence-item">
                             <div className="section-topline">
                               <div>
                                 <p className="event-name">{item.payloadLabel}</p>
@@ -4031,13 +4931,13 @@ if status == no-show:
                 </div>
                 <div className="metric-grid">
                   {railMetrics.map((metric) => (
-                    <article key={metric.label} className="metric-card">
+                    <article key={metric.label} className="surface-card surface-card-tight metric-card">
                       <p className="metric-label">{metric.label}</p>
                       <p className="metric-value">{metric.value}</p>
                       <p className="metric-delta">{metric.delta}</p>
                     </article>
                   ))}
-                  <article className="metric-card">
+                  <article className="surface-card surface-card-tight metric-card">
                     <p className="metric-label">Onboarding runs</p>
                     <p className="metric-value">{onboardingCompleted}</p>
                     <p className="metric-delta">
@@ -4147,7 +5047,7 @@ if status == no-show:
                 </div>
                 <div className="sync-card">
                   <div className="sync-summary">
-                    <div className="sync-summary-item">
+                    <div className="surface-card surface-card-tight sync-summary-item">
                       <p className="metric-label">Realtime</p>
                       <p className="metric-value">
                         {syncStatus?.realtime.connected ? 'Connected' : 'Polling'}
@@ -4157,7 +5057,7 @@ if status == no-show:
                         {syncStatus?.realtime.pollMs ?? 0}ms poll
                       </p>
                     </div>
-                    <div className="sync-summary-item">
+                    <div className="surface-card surface-card-tight sync-summary-item">
                       <p className="metric-label">Remote snapshot</p>
                       <p className="metric-value">
                         {syncStatus?.remote && !('error' in syncStatus.remote) && syncStatus.remote.found
@@ -4170,17 +5070,17 @@ if status == no-show:
                           : 'No remote snapshot loaded'}
                       </p>
                     </div>
-                    <div className="sync-summary-item">
+                    <div className="surface-card surface-card-tight sync-summary-item">
                       <p className="metric-label">Mirror rows</p>
                       <p className="metric-value">
-                        {syncStatus?.mirror && !('error' in syncStatus.mirror)
-                          ? Object.values(syncStatus.mirror).reduce((total, count) => total + count, 0)
+                        {syncStatus?.supabase && !('error' in syncStatus.supabase)
+                          ? Object.values(syncStatus.supabase).reduce((total, count) => total + count, 0)
                           : 0}
                       </p>
                       <p className="metric-delta">
-                        {syncStatus?.mirror && !('error' in syncStatus.mirror)
-                          ? `${Object.keys(syncStatus.mirror).length} tables mirrored`
-                          : 'Mirror health unavailable'}
+                        {syncStatus?.supabase && !('error' in syncStatus.supabase)
+                          ? `${Object.keys(syncStatus.supabase).length} tables synced`
+                          : 'Supabase sync unavailable'}
                       </p>
                     </div>
                   </div>
@@ -4251,7 +5151,7 @@ if status == no-show:
                         const shared = Number((diff as { shared?: number }).shared ?? 0)
 
                         return (
-                          <article key={field} className="sync-diff-card">
+                          <article key={field} className="surface-card surface-card-tight sync-diff-card">
                             <p className="event-name">{field}</p>
                             <p className="timeline-meta">
                               +{remoteOnly} / -{localOnly} / {shared} shared
@@ -4397,7 +5297,7 @@ if status == no-show:
                   <span className="timeline-meta">{runtimeHost}</span>
                 </div>
                 <div className="deployment-proof-grid">
-                  <article className="deployment-proof-card">
+                  <article className="surface-card surface-card-tight deployment-proof-card">
                     <p className="metric-label">Runtime</p>
                     <p className="event-name">{runtimeStatus === 'ready' ? 'Live' : runtimeStatus}</p>
                     <p className="timeline-meta">
@@ -4406,7 +5306,7 @@ if status == no-show:
                         : 'Deployed runtime path with the same operator console behavior.'}
                     </p>
                   </article>
-                  <article className="deployment-proof-card">
+                  <article className="surface-card surface-card-tight deployment-proof-card">
                     <p className="metric-label">Auth</p>
                     <p className="event-name">{authSession?.bypass ? 'Local bypass' : authSession?.sub ?? 'Not signed in'}</p>
                     <p className="timeline-meta">
@@ -4415,14 +5315,14 @@ if status == no-show:
                         : 'Session state is checked before the operator surfaces render.'}
                     </p>
                   </article>
-                  <article className="deployment-proof-card">
+                  <article className="surface-card surface-card-tight deployment-proof-card">
                     <p className="metric-label">Data</p>
-                    <p className="event-name">SQLite + optional Supabase mirror</p>
+                    <p className="event-name">SQLite + repo-owned Supabase sync</p>
                     <p className="timeline-meta">
                       Queue, reports, realtime events, and sync all ride the same server-backed state.
                     </p>
                   </article>
-                  <article className="deployment-proof-card">
+                  <article className="surface-card surface-card-tight deployment-proof-card">
                     <p className="metric-label">Handoff</p>
                     <p className="event-name">Reset, sign in, interview mode</p>
                     <p className="timeline-meta">
@@ -4444,7 +5344,7 @@ if status == no-show:
                 </div>
                 <div className="tool-template-grid">
                   {toolTemplates.map((template) => (
-                    <article key={template.id} className="tool-template-card">
+                    <article key={template.id} className="surface-card surface-card-standard tool-template-card">
                       <div className="section-topline">
                         <div>
                           <h3>{template.title}</h3>
@@ -4522,7 +5422,7 @@ if status == no-show:
                 <div className="tool-failure-list">
                   {failedDeliveries.length ? (
                     failedDeliveries.map((item) => (
-                      <article key={item.id} className="tool-failure-card">
+                      <article key={item.id} className="surface-card surface-card-standard tool-failure-card">
                         <div className="section-topline">
                           <div>
                             <p className="event-name">{item.payloadLabel}</p>
@@ -4554,8 +5454,206 @@ if status == no-show:
               </article>
             </div>
           ) : null}
-        </aside>
+        </article>
       </main>
+
+      <section className="console-secondary-shell" aria-label="Deferred workflow controls">
+        {secondaryPanel === 'notes' ? (
+          <article className="console-panel secondary-switcher-panel notes-panel">
+            <div className="section-topline">
+              <div>
+                <p className="panel-kicker">Operator notes</p>
+                <h2>Persisted locally</h2>
+              </div>
+              <span className="timeline-meta">Saved as you type</span>
+            </div>
+            <textarea
+              className="notes-editor"
+              value={operatorNotes}
+              onChange={(event) => setOperatorNotes(event.target.value)}
+              placeholder="Capture blockers, account-specific mapping, or deployment notes."
+            />
+          </article>
+        ) : null}
+
+        {secondaryPanel === 'workflow' ? (
+          <article className="console-panel secondary-switcher-panel deferred-workflow-drawer">
+            <div className="section-topline">
+              <div>
+                <p className="panel-kicker">Workflow notes</p>
+                <h2>Operator controls</h2>
+              </div>
+              <span className="timeline-meta">Collapsed elsewhere by default</span>
+            </div>
+
+            <div className="command-bar">
+              <div className="command-cluster">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => handleStepChange(stepIndex - 1)}
+                  disabled={stepIndex === 0}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={() => handleStepChange(stepIndex + 1)}
+                  disabled={stepIndex === runtime.stepLabels.length - 1}
+                >
+                  Advance
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => handleStepChange(0)}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={handleRuntimeReset}
+                  disabled={runtimeResetPending || authStatus !== 'authenticated'}
+                >
+                  {runtimeResetPending ? 'Resetting data…' : 'Reset data'}
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleInterviewMode}
+                  disabled={runtimeResetPending || authStatus !== 'authenticated'}
+                >
+                  {interviewMode ? 'Interview mode active' : 'Start interview mode'}
+                </button>
+              </div>
+
+              <div className="command-cluster">
+                <span className={`runtime-chip runtime-chip-${runtimeStatus}`}>
+                  {runtimeStatus === 'ready'
+                    ? 'Backend live'
+                    : runtimeStatus === 'loading'
+                      ? 'Loading runtime'
+                      : runtimeStatus === 'degraded'
+                        ? 'Runtime degraded'
+                        : 'Awaiting session'}
+                </span>
+                <span className="status-pill">
+                  {authSession?.bypass ? 'local bypass' : authSession?.sub ?? 'authenticated'}
+                </span>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleRunWorkflow}
+                  disabled={!hasLiveLead || !liveConsoleReady}
+                >
+                  Run workflow
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={handleLogNote}
+                  disabled={!liveConsoleReady}
+                >
+                  Log note
+                </button>
+              </div>
+            </div>
+
+            <section className={`interview-band ${interviewMode ? 'interview-band-active' : ''}`}>
+              <div className="interview-band-copy">
+                <p className="panel-kicker">Interview mode</p>
+                <h2>
+                  {interviewMode
+                    ? 'Guided narrative is loaded'
+                    : 'Interview walkthrough is available'}
+                </h2>
+                <p className="stat-note">
+                  {interviewMode
+                    ? 'Use the curated step cards to jump between the DM sprint, GHL recovery, integration evidence, revenue board, and proof pack.'
+                    : 'Launch guided mode only when you want the interview script and proof path.'}
+                </p>
+              </div>
+              <div className="interview-band-actions">
+                {interviewMode ? <span className="status-pill">{activeInterviewStep.title}</span> : null}
+                {interviewMode ? (
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    onClick={() => focusInterviewStep(activeInterviewStep)}
+                    disabled={!liveConsoleReady}
+                  >
+                    Focus current step
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleInterviewMode}
+                  disabled={runtimeResetPending || authStatus !== 'authenticated'}
+                >
+                  {runtimeResetPending ? 'Loading…' : interviewMode ? 'Refresh guided mode' : 'Launch guided mode'}
+                </button>
+              </div>
+            </section>
+
+            {interviewMode ? (
+              <section className="interview-step-grid" aria-label="Interview walkthrough steps">
+                {interviewGuideSteps.map((step, index) => {
+                  const isActive = activeInterviewStep.id === step.id
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      className={`surface-tile interview-step-card ${isActive ? 'surface-tile-active interview-step-card-active' : ''}`}
+                      onClick={() => focusInterviewStep(step)}
+                    >
+                      <div className="section-topline">
+                        <div>
+                          <p className="mini-label">
+                            Step 0{index + 1}
+                            {isActive ? ' • active' : ''}
+                          </p>
+                          <h3>{step.title}</h3>
+                        </div>
+                        <span className="status-pill">{step.workbenchTab}</span>
+                      </div>
+                      <p className="stat-note">{step.detail}</p>
+                      <p className="timeline-meta">{step.skill}</p>
+                    </button>
+                  )
+                })}
+              </section>
+            ) : null}
+          </article>
+        ) : null}
+
+        <div className="secondary-switcher" role="tablist" aria-label="Secondary panels">
+          {[
+            ['systems', 'Systems'],
+            ['notes', 'Notes'],
+            ['workflow', 'Workflow'],
+          ].map(([value, label]) => {
+            const panelValue = value as 'systems' | 'notes' | 'workflow'
+            const isActive = secondaryPanel === panelValue
+
+            return (
+              <button
+                key={value}
+                type="button"
+                className={`button button-secondary secondary-switcher-button ${
+                  isActive ? 'secondary-switcher-button-active' : ''
+                }`}
+                onClick={() => setSecondaryPanel(isActive ? null : panelValue)}
+                aria-pressed={isActive}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </section>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-create table if not exists public.cobe_leads (
+create table if not exists public.cobe_funnel_ops_leads (
   id text primary key,
   name text not null,
   handle text not null,
@@ -14,7 +14,7 @@ create table if not exists public.cobe_leads (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_bookings (
+create table if not exists public.cobe_funnel_ops_bookings (
   id text primary key,
   lead_id text not null,
   slot text not null,
@@ -25,7 +25,7 @@ create table if not exists public.cobe_bookings (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_conversations (
+create table if not exists public.cobe_funnel_ops_conversations (
   id text primary key,
   lead_id text not null,
   intent text not null,
@@ -35,7 +35,7 @@ create table if not exists public.cobe_conversations (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_messages (
+create table if not exists public.cobe_funnel_ops_messages (
   id text primary key,
   conversation_id text not null,
   sender text not null,
@@ -45,7 +45,7 @@ create table if not exists public.cobe_messages (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_delivery_queue (
+create table if not exists public.cobe_funnel_ops_delivery_queue (
   id text primary key,
   connector text not null,
   channel text not null,
@@ -58,7 +58,7 @@ create table if not exists public.cobe_delivery_queue (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_delivery_attempts (
+create table if not exists public.cobe_funnel_ops_delivery_attempts (
   id text primary key,
   delivery_id text not null,
   status text not null,
@@ -68,7 +68,7 @@ create table if not exists public.cobe_delivery_attempts (
   synced_at timestamptz not null default now()
 );
 
-create table if not exists public.cobe_audit_events (
+create table if not exists public.cobe_funnel_ops_audit_events (
   id text primary key,
   kind text not null,
   title text not null,
@@ -81,12 +81,12 @@ create table if not exists public.cobe_audit_events (
 
 grant usage on schema public to postgres, anon, authenticated, service_role;
 grant select, insert, update, delete on
-  public.cobe_leads,
-  public.cobe_bookings,
-  public.cobe_conversations,
-  public.cobe_messages,
-  public.cobe_delivery_queue,
-  public.cobe_delivery_attempts,
-  public.cobe_audit_events,
-  public.cobe_state_snapshots
+  public.cobe_funnel_ops_leads,
+  public.cobe_funnel_ops_bookings,
+  public.cobe_funnel_ops_conversations,
+  public.cobe_funnel_ops_messages,
+  public.cobe_funnel_ops_delivery_queue,
+  public.cobe_funnel_ops_delivery_attempts,
+  public.cobe_funnel_ops_audit_events,
+  public.cobe_funnel_ops_state_snapshots
 to anon, authenticated, service_role;

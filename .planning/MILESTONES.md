@@ -11,3 +11,15 @@
 - Centralized consult workflow transitions now drive owner-aware booking updates, recovery state, and the canonical booking-update API contract
 
 ---
+
+## v3.0 Integration Operating Graph (Planned: 2026-04-05)
+
+**Phases planned:** 8 phases, 31 plans
+
+**Key goals:**
+
+- Turn integrations into one real event-driven operating layer instead of proof cards
+- Make lead state traceable across Instagram DM, ManyChat, Zapier, Make, GHL, Stripe, Slack, Discord, and Apify
+- Add orchestration inspection, replay, retry, alerting, enrichment, and failure triage
+
+---

@@ -1,110 +1,161 @@
-# Roadmap: COBE Interview Operating System
+# Roadmap: COBE Integration Operating Graph
 
 ## Overview
 
-This milestone turns the shipped COBE operator console into an interview-grade product. The job of v2 is not to rebuild the core system; v2 makes the existing system easier to explain, easier to trust, and harder to dismiss as a demo.
+This milestone turns the console from an interview-proof dashboard into a system where integrations actively drive the product. The goal is not to add more connector logos. The goal is to make Instagram DM, ManyChat, Zapier, Make, GHL, Stripe, Discord, Slack, and Apify behave like real sources of state, routing, enrichment, escalation, and revenue movement inside the app.
 
-The roadmap focuses on one thing: when someone watches the product for the first time, they should immediately understand the workflow, the integrations, the resilience, and why the operator would be hireable.
+The milestone focuses on one thing: when someone clicks a lead, they should be able to see which integrations touched it, what each one did, what failed, what retried, and what the operator should do next.
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases continue from the archived milestone: 6, 7, 8, 9, 10
+- Integer phases continue from the previous milestone: 11, 12, 13, 14, 15, 16, 17, 18
 
-- [ ] **Phase 6: Interview Mode And Guided Narrative** - Add one-click curated demo state, guided skill walkthroughs, and proof-pack generation
-- [ ] **Phase 7: Integration Evidence Center** - Expose the real connector story: payloads, retries, health, replay, and live evidence
-- [ ] **Phase 8: Scenario Simulator And Replay Lab** - Make the product replayable so success paths and failure branches can be shown on demand
-- [ ] **Phase 9: Brand And Presentation Upgrade** - Rebuild the presentation layer so the console feels premium, consistent, and interview-ready
-- [ ] **Phase 10: Deployment, Hand-off, And Credibility Hardening** - Make deployment, auth, data transparency, and operator handoff obvious and trustworthy
+- [x] **Phase 11: Integration Inbox And Event Contract** - Turn integrations into first-class inbound events with one shared event model
+- [x] **Phase 12: Lead Lifecycle Graph** - Show the full integration-driven lead journey from DM to onboarding
+- [ ] **Phase 13: Zapier And Make Run Inspector** - Expose orchestration runs, branches, retries, and downstream mutations
+- [ ] **Phase 14: GHL Pipeline And Recovery Engine** - Make call routing, no-show recovery, and owner assignment feel operationally real
+- [ ] **Phase 15: Stripe To Onboarding Chain** - Make payment events visibly trigger revenue updates and onboarding handoff
+- [ ] **Phase 16: Slack And Discord Alert Center** - Turn team escalation into a visible and retryable part of the workflow
+- [ ] **Phase 17: Apify Enrichment And Lead Intelligence** - Make enrichment affect score, priority, and route decisions
+- [ ] **Phase 18: Reliability, Replay, And Failure Hardening** - Prove the integration layer can fail visibly and recover cleanly
 
 ## Phase Details
 
-### Phase 6: Interview Mode And Guided Narrative
-**Goal**: Give the app a one-click interview mode and a guided tour that maps the job post to the product.
-**Depends on**: v1.0 shipped console
-**Requirements**: [NARR-01, NARR-02, NARR-03]
+### Phase 11: Integration Inbox And Event Contract
+**Goal**: Make integrations feel real by turning them into one shared inbound event system.
+**Depends on**: Existing queue, timeline, audit, and connector state surfaces
+**Requirements**: [EVT-01, EVT-02, EVT-03]
 **Success Criteria** (what must be TRUE):
-  1. The app can open directly into a curated, high-signal state without manual setup.
-  2. The app can narrate its own value by connecting visible UI sections to the interview requirements.
-  3. A proof pack can be generated from live state after the walkthrough.
+  1. The app has one integration inbox that records inbound events across DM, orchestration, booking, payment, alerting, and enrichment.
+  2. Every inbound event mutates visible product state or explicitly records why it did not.
+  3. Lead timelines, queue state, and audit logs read from the same integration event model.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 11-01: Define a shared integration event shape for inbound connector activity
+- [ ] 11-02: Build an integration inbox surface with type, source, target, payload summary, and status
+- [ ] 11-03: Map inbound events into queue, timeline, and audit mutations
+- [ ] 11-04: Add operator filters for source, status, and lead targeting across the inbox
+
+### Phase 12: Lead Lifecycle Graph
+**Goal**: Let the operator inspect one lead and understand its full journey across systems.
+**Depends on**: Phase 11
+**Requirements**: [LIFE-01, LIFE-02]
+**Success Criteria** (what must be TRUE):
+  1. A lead can be traced from IG DM or ManyChat entry through routing, booking, checkout, purchase, onboarding, and alerts.
+  2. Every lifecycle step shows which integration caused it and when.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 12-01: Build a per-lead lifecycle graph or timeline for integration-driven state changes
+- [ ] 12-02: Tie queue stages and badges directly to lifecycle transitions
+- [ ] 12-03: Add visible cross-system links between DM, booking, payment, onboarding, and alerts
+- [ ] 12-04: Make the active workflow pane prioritize lifecycle understanding over filler chrome
+
+### Phase 13: Zapier And Make Run Inspector
+**Goal**: Make orchestration logic inspectable and believable instead of implied.
+**Depends on**: Phase 12
+**Requirements**: [ORCH-01, ORCH-02, ORCH-03]
+**Success Criteria** (what must be TRUE):
+  1. Zapier and Make runs show trigger, branch, actions, status, retries, and downstream effects.
+  2. Operators can replay or rerun failed orchestration work from the app.
+  3. The app proves workflow logic, not just connector presence.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 13-01: Add a run inspector for Zapier and Make scenarios
+- [ ] 13-02: Show branch decisions, filters, and action chains inside the inspector
+- [ ] 13-03: Add rerun, replay, and retry actions for orchestration failures
+- [ ] 13-04: Link orchestration runs back to leads, alerts, and revenue effects
+
+### Phase 14: GHL Pipeline And Recovery Engine
+**Goal**: Make GHL pipeline behavior first-class in the product.
+**Depends on**: Phase 13
+**Requirements**: [GHL-01, GHL-02]
+**Success Criteria** (what must be TRUE):
+  1. Booked, no-show, rescheduled, recovered, and won states behave like real pipeline stages.
+  2. Owner routing and recovery playbooks are visible, actionable, and tied to timeline events.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 14-01: Add a visible GHL pipeline state model to the lead workflow
+- [ ] 14-02: Show owner assignment, routing rules, and no-show escalation triggers
+- [ ] 14-03: Add reschedule and recovery sequences as inspectable timeline branches
+- [ ] 14-04: Tie GHL mutations into alerts, queue priority, and revenue recovery
+
+### Phase 15: Stripe To Onboarding Chain
+**Goal**: Make purchase events visibly drive revenue and onboarding.
+**Depends on**: Phase 14
+**Requirements**: [PAY-01, PAY-02]
+**Success Criteria** (what must be TRUE):
+  1. Stripe purchase events visibly update revenue, lead state, and onboarding state.
+  2. Operators can inspect the exact handoff from payment to provisioning.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 15-01: Connect purchase events to revenue state and lead promotion
+- [ ] 15-02: Show onboarding autopilot steps created by Stripe purchase events
+- [ ] 15-03: Add payment-to-provisioning handoff proof in the active workflow
+- [ ] 15-04: Surface failures where payment succeeded but onboarding or notification did not
+
+### Phase 16: Slack And Discord Alert Center
+**Goal**: Make team communication part of the operating system rather than a side note.
+**Depends on**: Phase 15
+**Requirements**: [ALERT-01, ALERT-02]
+**Success Criteria** (what must be TRUE):
+  1. Slack and Discord alerts are visible as triggered, acknowledged, retried, or failed work.
+  2. Alerting logic is tied to lead state, failures, and escalations.
+**Plans**: 4 plans
+
+Plans:
+- [ ] 16-01: Build an alert center for Slack and Discord notifications
+- [ ] 16-02: Track recipient, acknowledgment, retry, and delivery status
+- [ ] 16-03: Add alert triggers for hot leads, no-shows, failures, and recovered revenue
+- [ ] 16-04: Link alerts back to the lead lifecycle and operator queue
+
+### Phase 17: Apify Enrichment And Lead Intelligence
+**Goal**: Make lead enrichment operationally consequential.
+**Depends on**: Phase 16
+**Requirements**: [ENRICH-01, ENRICH-02]
+**Success Criteria** (what must be TRUE):
+  1. Apify enrichment updates visible lead score, route, or priority.
+  2. Operators can see what enrichment changed and why it mattered.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: Add an interview-mode bootstrap that selects a high-signal lead, queue, and report state
-- [ ] 06-02: Build a guided walkthrough that maps the job post skills to the app surfaces
-- [ ] 06-03: Add a proof-pack export that summarizes the live demo state for follow-up
+- [ ] 17-01: Add an enrichment panel with creator or lead intelligence results
+- [ ] 17-02: Feed enrichment into lead score, routing, and queue priority
+- [ ] 17-03: Show enrichment provenance and last-refresh state in the workflow
 
-### Phase 7: Integration Evidence Center
-**Goal**: Make the app’s integrations impossible to hand-wave away by surfacing real connector evidence.
-**Depends on**: Phase 6
-**Requirements**: [INTG-01, INTG-02, INTG-03]
+### Phase 18: Reliability, Replay, And Failure Hardening
+**Goal**: Prove that the integration graph is durable under failure, not just in happy paths.
+**Depends on**: Phase 17
+**Requirements**: [REL-01, REL-02, REL-03]
 **Success Criteria** (what must be TRUE):
-  1. GHL, Meta CAPI, Zapier/Make, ManyChat, Apify, Kajabi, Skool, and Discord are visible as working evidence, not just labels.
-  2. Connector payloads, retries, and health can be inspected in the console.
-  3. Replay data and event naming are understandable without opening server logs.
+  1. Failures across orchestration, alerts, booking, payment, and enrichment are visible and triageable.
+  2. Important integration events can be replayed or retried from the app.
+  3. Connector health reflects real retry and backlog pressure, not generic status labels.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 07-01: Build an integration evidence view for every named job-post connector
-- [ ] 07-02: Add connector payload history and retry inspection surfaces
-- [ ] 07-03: Surface event naming, webhook proof, and replay detail in the operator console
-- [ ] 07-04: Add health summaries that explain which integrations are healthy, degraded, or retrying
-
-### Phase 8: Scenario Simulator And Replay Lab
-**Goal**: Let the product replay realistic success and failure branches across the full workflow.
-**Depends on**: Phase 7
-**Requirements**: [SIM-01, SIM-02]
-**Success Criteria** (what must be TRUE):
-  1. The console can replay a full lead journey from DM to onboarding with different branches.
-  2. Common failure states are visible and actionable instead of buried in logs.
-**Plans**: 3 plans
-
-Plans:
-- [ ] 08-01: Add scenario replay controls for the main lead journeys
-- [ ] 08-02: Add failure-state simulations for webhook, sync, and onboarding exceptions
-- [ ] 08-03: Build a replay and triage flow that shows what happened, what failed, and what to do next
-
-### Phase 9: Brand And Presentation Upgrade
-**Goal**: Make the console feel like a deliberate premium internal tool instead of a set of dashboard boxes.
-**Depends on**: Phase 8
-**Requirements**: [BRAND-01, BRAND-02]
-**Success Criteria** (what must be TRUE):
-  1. The layout reads as full-width, intentional, and interview-ready.
-  2. The visual system uses real COBE brand assets consistently.
-  3. The page hierarchy stays coherent across the major operator surfaces.
-**Plans**: 4 plans
-
-Plans:
-- [ ] 09-01: Refresh the full-width layout and page hierarchy around the best-performing console sections
-- [ ] 09-02: Replace weak or inconsistent branding with the real COBE brand assets
-- [ ] 09-03: Unify typography, spacing, motion, and card treatments across the product
-- [ ] 09-04: Tune the presentation so the product is visually strong in a live walkthrough
-
-### Phase 10: Deployment, Hand-off, And Credibility Hardening
-**Goal**: Make the system obviously deployable, transparent, and trustworthy enough to hand off.
-**Depends on**: Phase 9
-**Requirements**: [DEP-04, DEP-05, DATA-01]
-**Success Criteria** (what must be TRUE):
-  1. The deployment story is clear and repeatable.
-  2. The app explains what data powers the queue, revenue, timeline, integrations, and proof layers.
-  3. The console is easy to hand off because auth, sync, and operator behavior are obvious.
-**Plans**: 4 plans
-
-Plans:
-- [ ] 10-01: Document and reinforce the primary deploy/runtime story for the app
-- [ ] 10-02: Add data transparency panels that explain what powers each major surface
-- [ ] 10-03: Clarify auth, sync, and operator handoff behavior inside the product
-- [ ] 10-04: Add regression coverage for the new interview-mode, evidence, and replay surfaces
+- [ ] 18-01: Expand replay and retry across all major integrations
+- [ ] 18-02: Add backlog, stale-run, and failure-state indicators with real consequences
+- [ ] 18-03: Build operator triage views for failed events and blocked leads
+- [ ] 18-04: Add regression coverage around the integration graph and replay surfaces
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 6 → 7 → 8 → 9 → 10
+Phases execute in numeric order: 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 6. Interview Mode And Guided Narrative | 0/3 | Not started | - |
-| 7. Integration Evidence Center | 0/4 | Not started | - |
-| 8. Scenario Simulator And Replay Lab | 0/3 | Not started | - |
-| 9. Brand And Presentation Upgrade | 0/4 | Not started | - |
-| 10. Deployment, Hand-off, And Credibility Hardening | 0/4 | Not started | - |
+| 11. Integration Inbox And Event Contract | 4/4 | Completed | 2026-04-06 |
+| 12. Lead Lifecycle Graph | 4/4 | Completed | 2026-04-06 |
+| 13. Zapier And Make Run Inspector | 3/4 | In progress | - |
+| 14. GHL Pipeline And Recovery Engine | 0/4 | Not started | - |
+| 15. Stripe To Onboarding Chain | 0/4 | Not started | - |
+| 16. Slack And Discord Alert Center | 0/4 | Not started | - |
+| 17. Apify Enrichment And Lead Intelligence | 0/3 | Not started | - |
+| 18. Reliability, Replay, And Failure Hardening | 0/4 | Not started | - |

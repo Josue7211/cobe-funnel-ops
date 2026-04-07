@@ -23,20 +23,20 @@ if (existsSync(localEnvFile)) {
   }
 }
 
-const tableName = process.env.SUPABASE_STATE_TABLE || 'cobe_state_snapshots'
-const mirrorTables = {
-  leads: 'cobe_leads',
-  bookings: 'cobe_bookings',
-  conversations: 'cobe_conversations',
-  messages: 'cobe_messages',
-  deliveryQueue: 'cobe_delivery_queue',
-  deliveryAttempts: 'cobe_delivery_attempts',
-  auditEvents: 'cobe_audit_events',
+const tableName = process.env.COBE_SUPABASE_STATE_TABLE || 'cobe_funnel_ops_state_snapshots'
+const supabaseTables = {
+  leads: 'cobe_funnel_ops_leads',
+  bookings: 'cobe_funnel_ops_bookings',
+  conversations: 'cobe_funnel_ops_conversations',
+  messages: 'cobe_funnel_ops_messages',
+  deliveryQueue: 'cobe_funnel_ops_delivery_queue',
+  deliveryAttempts: 'cobe_funnel_ops_delivery_attempts',
+  auditEvents: 'cobe_funnel_ops_audit_events',
 }
 
 function getConfig() {
-  const url = process.env.SUPABASE_URL?.trim()
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  const url = process.env.COBE_SUPABASE_URL?.trim()
+  const key = process.env.COBE_SUPABASE_SERVICE_ROLE_KEY?.trim()
   return {
     url,
     key,
@@ -65,7 +65,7 @@ function digestState(state) {
 
 function mapMirrorRows(state) {
   return {
-    [mirrorTables.leads]: (state.leadRecords ?? []).map((lead) => ({
+    [supabaseTables.leads]: (state.leadRecords ?? []).map((lead) => ({
       id: lead.id,
       name: lead.name,
       handle: lead.handle,
@@ -79,7 +79,7 @@ function mapMirrorRows(state) {
       last_touch: lead.lastTouch,
       sync_source: 'sqlite',
     })),
-    [mirrorTables.bookings]: (state.bookingRecords ?? []).map((booking) => ({
+    [supabaseTables.bookings]: (state.bookingRecords ?? []).map((booking) => ({
       id: booking.id,
       lead_id: booking.leadId,
       slot: booking.slot,
@@ -88,7 +88,7 @@ function mapMirrorRows(state) {
       recovery_action: booking.recoveryAction,
       sync_source: 'sqlite',
     })),
-    [mirrorTables.conversations]: (state.conversations ?? []).map((conversation) => ({
+    [supabaseTables.conversations]: (state.conversations ?? []).map((conversation) => ({
       id: conversation.id,
       lead_id: conversation.leadId,
       intent: conversation.intent,
@@ -96,7 +96,7 @@ function mapMirrorRows(state) {
       automation_summary: conversation.automationSummary,
       sync_source: 'sqlite',
     })),
-    [mirrorTables.messages]: (state.conversations ?? []).flatMap((conversation) =>
+    [supabaseTables.messages]: (state.conversations ?? []).flatMap((conversation) =>
       (conversation.messages ?? []).map((message) => ({
         id: message.id,
         conversation_id: conversation.id,
@@ -106,7 +106,7 @@ function mapMirrorRows(state) {
         sync_source: 'sqlite',
       })),
     ),
-    [mirrorTables.deliveryQueue]: (state.deliveryQueue ?? []).map((entry) => ({
+    [supabaseTables.deliveryQueue]: (state.deliveryQueue ?? []).map((entry) => ({
       id: entry.id,
       connector: entry.connector,
       channel: entry.channel,
@@ -117,7 +117,7 @@ function mapMirrorRows(state) {
       note: entry.note,
       sync_source: 'sqlite',
     })),
-    [mirrorTables.deliveryAttempts]: (state.deliveryAttempts ?? []).map((entry) => ({
+    [supabaseTables.deliveryAttempts]: (state.deliveryAttempts ?? []).map((entry) => ({
       id: entry.id,
       delivery_id: entry.deliveryId,
       status: entry.status,
@@ -125,7 +125,7 @@ function mapMirrorRows(state) {
       attempted_at: entry.attemptedAt,
       sync_source: 'sqlite',
     })),
-    [mirrorTables.auditEvents]: (state.auditEvents ?? []).map((entry) => ({
+    [supabaseTables.auditEvents]: (state.auditEvents ?? []).map((entry) => ({
       id: entry.id,
       kind: entry.kind,
       title: entry.title,
@@ -247,7 +247,7 @@ export async function pushRemoteSnapshot(state, source = 'sqlite-local') {
   }
 }
 
-export async function pushRemoteMirror(state) {
+export async function pushSupabaseState(state) {
   if (!isRemoteSyncConfigured()) {
     return { ok: false, message: 'Supabase sync is not configured.' }
   }
@@ -274,14 +274,14 @@ export async function pushRemoteMirror(state) {
   }
 }
 
-export async function fetchRemoteMirrorCounts() {
+export async function fetchSupabaseCounts() {
   if (!isRemoteSyncConfigured()) {
     return { ok: false, message: 'Supabase sync is not configured.' }
   }
 
   const counts = {}
 
-  for (const table of Object.values(mirrorTables)) {
+  for (const table of Object.values(supabaseTables)) {
     const response = await fetch(buildUrl(`/rest/v1/${table}?select=id`), {
       headers: {
         apikey: getConfig().key,
@@ -306,7 +306,7 @@ export async function fetchRemoteMirrorCounts() {
   }
 }
 
-export async function fetchRemoteMirrorRows(table, select = '*') {
+export async function fetchSupabaseRows(table, select = '*') {
   if (!isRemoteSyncConfigured()) {
     return { ok: false, message: 'Supabase sync is not configured.' }
   }

@@ -215,9 +215,9 @@ function seedOnboardingRuns(seedTimestampTotal) {
 
   const insertRun = db.prepare(
     `INSERT INTO onboarding_runs (
-      id, lead_id, status, folder_url, sop_url, invite_url, created_at, updated_at
+      id, lead_id, status, folder_url, sop_url, invite_url, handoff_json, created_at, updated_at
     ) VALUES (
-      @id, @lead_id, @status, @folder_url, @sop_url, @invite_url, @created_at, @updated_at
+      @id, @lead_id, @status, @folder_url, @sop_url, @invite_url, @handoff_json, @created_at, @updated_at
     )`,
   )
 
@@ -441,6 +441,7 @@ function readBookings() {
         recoveryAction: row.recovery_action,
         routingLane: transition.lane,
         leadStage: transition.leadStage,
+        updatedAt: row.updated_at,
       }
     })
 }
@@ -482,6 +483,7 @@ function readWebhookHistory() {
       id: row.id,
       label: row.label,
       payload: row.payload,
+      createdAt: row.created_at,
     }))
 }
 
@@ -605,8 +607,250 @@ function readOnboardingRuns() {
     }))
 }
 
+function truncateSummary(value, limit = 120) {
+  const text = String(value ?? '').trim()
+  if (!text) {
+    return 'No payload summary available.'
+  }
+
+  if (text.length <= limit) {
+    return text
+  }
+
+  return `${text.slice(0, limit - 1)}…`
+}
+
+function summarizeWebhookPayload(payload, fallbackLabel) {
+  const parsed = json(payload, null)
+  if (parsed && typeof parsed === 'object') {
+    const label =
+      (typeof parsed.event_name === 'string' && parsed.event_name.trim()) ||
+      (typeof parsed.booking_status === 'string' && parsed.booking_status.trim()) ||
+      (typeof parsed.route === 'string' && parsed.route.trim()) ||
+      (typeof parsed.label === 'string' && parsed.label.trim()) ||
+      fallbackLabel
+
+    const source =
+      (typeof parsed.source === 'string' && parsed.source.trim()) ||
+      (typeof parsed.connector === 'string' && parsed.connector.trim()) ||
+      (typeof parsed.channel === 'string' && parsed.channel.trim()) ||
+      null
+
+    return [label, source].filter(Boolean).join(' • ')
+  }
+
+  return truncateSummary(payload)
+}
+
+function buildLeadLookup(state) {
+  const byHandle = new Map()
+  const byName = new Map()
+  const byId = new Map()
+
+  for (const lead of state.leadRecords) {
+    const id = String(lead.id || '').trim().toLowerCase()
+    const handle = String(lead.handle || '').trim().toLowerCase()
+    const name = String(lead.name || '').trim().toLowerCase()
+
+    if (id) {
+      byId.set(id, lead.id)
+    }
+    if (handle) {
+      byHandle.set(handle, lead.id)
+    }
+    if (name) {
+      byName.set(name, lead.id)
+    }
+  }
+
+  return (value) => {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (!normalized) {
+      return undefined
+    }
+    return byId.get(normalized) ?? byHandle.get(normalized) ?? byName.get(normalized)
+  }
+}
+
+function getRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+}
+
+function resolveLiveTestRunLeadId(payload, findLeadId) {
+  const parsed = json(payload, null)
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined
+  }
+
+  const leadObject = getRecord(parsed.lead)
+  const candidateValues = [
+    parsed.leadId,
+    parsed.lead_id,
+    parsed.lead_handle,
+    parsed.leadHandle,
+    parsed.handle,
+    parsed.user_id,
+    parsed.userId,
+    parsed.email,
+    leadObject?.leadId,
+    leadObject?.lead_id,
+    leadObject?.handle,
+    leadObject?.lead_handle,
+    leadObject?.lead,
+  ]
+
+  for (const value of candidateValues) {
+    if (typeof value !== 'string') {
+      continue
+    }
+    const candidate = value.trim().toLowerCase()
+    if (!candidate) {
+      continue
+    }
+
+    const direct = findLeadId(candidate)
+    if (direct) {
+      return direct
+    }
+
+    const handleCandidate = candidate.startsWith('@') ? candidate : `@${candidate}`
+    const byHandle = findLeadId(handleCandidate)
+    if (byHandle) {
+      return byHandle
+    }
+  }
+
+  return undefined
+}
+
+function buildIntegrationEvents(state) {
+  const findLeadId = buildLeadLookup(state)
+  const leadById = new Map(state.leadRecords.map((lead) => [lead.id, lead]))
+
+  const webhookEvents = state.webhookHistory.map((entry) => {
+    const parsed = json(entry.payload, null)
+    const target =
+      (parsed && typeof parsed.handle === 'string' && parsed.handle.trim()) ||
+      (parsed && typeof parsed.leadId === 'string' && parsed.leadId.trim()) ||
+      entry.label
+
+    return {
+      id: `webhook-${entry.id}`,
+      kind: 'webhook',
+      source: 'Webhook inbox',
+      target,
+      summary: summarizeWebhookPayload(entry.payload, entry.label),
+      status: 'processed',
+      timestamp: entry.createdAt,
+      leadId: findLeadId(target),
+      effect: 'Captures the inbound payload for replay and inspection.',
+    }
+  })
+
+  const bookingEvents = state.bookingRecords.map((booking) => {
+    const lead = leadById.get(booking.leadId)
+    const status =
+      booking.status === 'lost'
+        ? 'failed'
+        : booking.status === 'no-show'
+          ? 'warning'
+          : 'processed'
+
+    return {
+      id: `booking-${booking.id}`,
+      kind: 'booking',
+      source: 'GHL booking',
+      target: lead?.handle ?? booking.leadId,
+      summary: `${booking.status} • ${booking.recoveryAction}`,
+      status,
+      timestamp: booking.updatedAt ?? booking.slot,
+      leadId: booking.leadId,
+      effect:
+        booking.status === 'no-show'
+          ? 'Marks the recovery branch and keeps the lead in operator view.'
+          : booking.status === 'lost'
+            ? 'Closes the consult path and records why the mutation stopped.'
+            : 'Updates lead state and keeps the consult branch moving.',
+    }
+  })
+
+  const onboardingEvents = state.onboardingRuns.map((run) => {
+    const lead = leadById.get(run.leadId)
+    return {
+      id: `onboarding-${run.id}`,
+      kind: 'onboarding',
+      source: 'Onboarding',
+      target: lead?.handle ?? run.leadId,
+      summary: `${run.status} • ${run.folderUrl}`,
+      status: run.status === 'provisioned' ? 'processed' : 'warning',
+      timestamp: run.updatedAt,
+      leadId: run.leadId,
+      effect: 'Creates the handoff bundle and staged access payloads.',
+    }
+  })
+
+  const deliveryEvents = state.deliveryQueue.map((entry) => ({
+    id: `delivery-${entry.id}`,
+    kind: 'delivery',
+    source: entry.connector,
+    target: entry.target,
+    summary: `${entry.payloadLabel} • ${entry.note}`,
+    status: entry.status,
+    timestamp: entry.lastAttempt,
+    leadId: findLeadId(entry.target),
+    effect:
+      entry.status === 'failed'
+        ? 'Needs a retry before the relay can clear backlog.'
+        : 'Updates relay pressure and outbox visibility.',
+  }))
+
+  const auditEvents = state.auditEvents.map((entry) => ({
+    id: `audit-${entry.id}`,
+    kind: 'audit',
+    source: entry.kind,
+    target: entry.target,
+    summary: `${entry.title} • ${entry.detail}`,
+    status: entry.kind === 'connector' ? 'warning' : 'processed',
+    timestamp: entry.timestamp,
+    leadId: findLeadId(entry.target),
+    effect:
+      entry.kind === 'connector'
+        ? 'Records connector health or a relay warning.'
+        : 'Records the workflow mutation for operator review.',
+  }))
+
+  const testEvents = state.liveTestRuns.map((run) => {
+    const runLeadId = resolveLiveTestRunLeadId(run.payload, findLeadId)
+    const runLead = runLeadId ? leadById.get(runLeadId) : undefined
+
+    return {
+      id: `test-${run.id}`,
+      kind: 'test',
+      source: run.connector,
+      target: run.scenarioTitle,
+      summary: `${run.stepLabel} • ${run.resultMessage}`,
+      status: run.status === 'accepted' ? 'processed' : 'warning',
+      timestamp: run.createdAt,
+      leadId: runLeadId,
+      effect: runLead
+        ? `${runLead.handle} • ${run.payloadLabel} • ${run.stepLabel}`
+        : 'Proves the relay path before it reaches live workflow state.',
+    }
+  })
+
+  return [...webhookEvents, ...bookingEvents, ...onboardingEvents, ...deliveryEvents, ...auditEvents, ...testEvents].sort(
+    (left, right) => {
+      const timeDifference = String(right.timestamp || '').localeCompare(String(left.timestamp || ''))
+      if (timeDifference !== 0) {
+        return timeDifference
+      }
+      return String(left.source || '').localeCompare(String(right.source || ''))
+    },
+  )
+}
+
 function snapshot() {
-  return {
+  const state = {
     leadRecords: readLeads(),
     bookingRecords: readBookings(),
     conversations: readConversations(),
@@ -620,6 +864,11 @@ function snapshot() {
     ruleTestResults: readRuleResults(),
     onboardingRuns: readOnboardingRuns(),
     dashboard: readDashboardSummary(),
+  }
+
+  return {
+    ...state,
+    integrationEvents: buildIntegrationEvents(state),
   }
 }
 

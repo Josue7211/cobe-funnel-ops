@@ -1,0 +1,356 @@
+<style>
+  .layout-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    margin-top: 24px;
+  }
+
+  .direction-card {
+    border: 1px solid #2f3542;
+    background: #111317;
+    padding: 18px;
+    cursor: pointer;
+  }
+
+  .direction-card[data-selected="true"] {
+    border-color: #6b7280;
+    outline: 1px solid #6b7280;
+  }
+
+  .direction-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .direction-label {
+    font-size: 12px;
+    color: #9aa3b2;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .direction-name {
+    margin: 4px 0 0;
+    font-size: 22px;
+    color: #f3f4f6;
+  }
+
+  .mock-shell {
+    border: 1px solid #2a2f39;
+    background: #0c0e12;
+    min-height: 420px;
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr auto;
+    gap: 12px;
+    border-bottom: 1px solid #262b35;
+    padding-bottom: 12px;
+  }
+
+  .title-block,
+  .metric-strip,
+  .toolbar,
+  .queue-block,
+  .workflow-block,
+  .rail-block,
+  .detail-card,
+  .section-bar {
+    border: 1px solid #262b35;
+    background: #13161c;
+  }
+
+  .title-block,
+  .toolbar,
+  .queue-block,
+  .workflow-block,
+  .rail-block,
+  .detail-card,
+  .section-bar {
+    padding: 10px;
+  }
+
+  .metric-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .metric-strip div {
+    padding: 10px;
+    border-right: 1px solid #262b35;
+  }
+
+  .metric-strip div:last-child {
+    border-right: 0;
+  }
+
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .pill {
+    border: 1px solid #363d49;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #c7ced9;
+  }
+
+  .layout-a-main {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .queue-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .queue-row {
+    border: 1px solid #2c313c;
+    padding: 10px;
+    background: #101319;
+  }
+
+  .workflow-body {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 0.9fr;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .detail-card.tall {
+    min-height: 210px;
+  }
+
+  .layout-b-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .layout-b-left {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .lead-drawer {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .mini-card {
+    border: 1px solid #2c313c;
+    background: #101319;
+    padding: 8px;
+    min-height: 74px;
+  }
+
+  .stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .section-title {
+    font-size: 12px;
+    color: #98a2b3;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .caption {
+    color: #b2bac6;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-top: 14px;
+  }
+
+  .fit {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #262b35;
+    color: #d7dde8;
+    font-size: 14px;
+  }
+
+  @media (max-width: 1100px) {
+    .layout-grid,
+    .layout-a-main,
+    .layout-b-main,
+    .detail-grid,
+    .topbar,
+    .lead-drawer {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<h2>Two layout directions for the operator console</h2>
+<p class="subtitle">Both options remove the three-way competition from the current screen. Click the one that feels closer, then reply in terminal with what still feels wrong.</p>
+
+<div class="layout-grid">
+  <div class="direction-card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="direction-head">
+      <div>
+        <div class="direction-label">Direction A</div>
+        <div class="direction-name">Queue + Focused Workflow</div>
+      </div>
+      <div class="pill">Best for daily operator use</div>
+    </div>
+
+    <div class="mock-shell">
+      <div class="topbar">
+        <div class="title-block">
+          <div class="section-title">COBE operator console</div>
+          One calm top bar. Product title, small KPI strip, global actions only.
+        </div>
+        <div class="metric-strip">
+          <div>Leads<br><strong>6</strong></div>
+          <div>Booked<br><strong>5</strong></div>
+          <div>Revenue<br><strong>$194</strong></div>
+        </div>
+        <div class="toolbar">
+          <span class="pill">Run test</span>
+          <span class="pill">Export</span>
+          <span class="pill">Logout</span>
+        </div>
+      </div>
+
+      <div class="layout-a-main">
+        <div class="queue-block">
+          <div class="section-title">Lead queue</div>
+          <div class="queue-list">
+            <div class="queue-row"><strong>Evan Ross</strong><br>Send recovery voice note</div>
+            <div class="queue-row">Maya Cruz<br>Checkout ready</div>
+            <div class="queue-row">Drew Hall<br>Waiting for response</div>
+            <div class="queue-row">Jules Kim<br>Onboarding handoff</div>
+          </div>
+        </div>
+
+        <div class="workflow-block workflow-body">
+          <div class="section-bar">
+            <div class="section-title">Active workflow</div>
+            Selected lead, current step, and next action sit above the fold.
+          </div>
+          <div class="section-bar">
+            Tabs collapse to three task modes: conversation, recovery, payloads.
+          </div>
+          <div class="detail-grid">
+            <div class="detail-card tall">
+              <div class="section-title">Primary canvas</div>
+              Large scrollable workflow view. This becomes the dominant surface.
+            </div>
+            <div class="stack">
+              <div class="detail-card">
+                <div class="section-title">Context</div>
+                Lead facts, routing, revenue, owner.
+              </div>
+              <div class="detail-card">
+                <div class="section-title">Actions</div>
+                Only task-relevant controls.
+              </div>
+              <div class="detail-card">
+                <div class="section-title">Notes</div>
+                Collapsed by default.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fit">Why this fixes your screenshot: the queue stays visible, the active workflow gets real width and one scroll boundary, and the right rail stops crushing the center.</div>
+  </div>
+
+  <div class="direction-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="direction-head">
+      <div>
+        <div class="direction-label">Direction B</div>
+        <div class="direction-name">Workflow First + Utility Rail</div>
+      </div>
+      <div class="pill">Best for demos and walkthroughs</div>
+    </div>
+
+    <div class="mock-shell">
+      <div class="topbar">
+        <div class="title-block">
+          <div class="section-title">COBE operator console</div>
+          Header becomes a small system bar. No giant KPI cards competing with content.
+        </div>
+        <div class="metric-strip">
+          <div>Queue<br><strong>6</strong></div>
+          <div>Failures<br><strong>1</strong></div>
+          <div>Revenue<br><strong>$194</strong></div>
+        </div>
+        <div class="toolbar">
+          <span class="pill">Live</span>
+          <span class="pill">Run workflow</span>
+        </div>
+      </div>
+
+      <div class="layout-b-main">
+        <div class="layout-b-left">
+          <div class="section-bar">
+            <div class="section-title">Lead picker</div>
+            Horizontal picker replaces the heavy left column.
+          </div>
+          <div class="lead-drawer">
+            <div class="mini-card">Evan</div>
+            <div class="mini-card">Maya</div>
+            <div class="mini-card">Drew</div>
+            <div class="mini-card">Jules</div>
+          </div>
+          <div class="detail-card tall">
+            <div class="section-title">Active workflow canvas</div>
+            One large stage view with steps, transcript, lifecycle, and replay in a single scroll region.
+          </div>
+        </div>
+
+        <div class="rail-block stack">
+          <div class="detail-card">
+            <div class="section-title">Operator context</div>
+            Owner, stage, current risk.
+          </div>
+          <div class="detail-card">
+            <div class="section-title">Actions</div>
+            Retry, reroute, alert, note.
+          </div>
+          <div class="detail-card">
+            <div class="section-title">Systems</div>
+            Inbox, metrics, relays.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fit">Why this fixes your screenshot: the workflow becomes the obvious centerpiece, but the queue becomes lighter and less useful for high-volume triage.</div>
+  </div>
+</div>
+
+<p class="caption">A is the stronger product layout if this is a real operator console. B is cleaner for storytelling and interview demos, but it weakens queue management.</p>
