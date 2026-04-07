@@ -4,7 +4,6 @@
 
 Live URLs:
 - Production app: `https://cobe.aparcedo.org`
-- GitHub Pages companion: `https://josue7211.github.io/cobe-funnel-ops/`
 
 Supported runtime contract:
 - one Node-capable deployment
@@ -112,12 +111,8 @@ Required behavior for a supported deployment:
 - `/api/auth/session` checks the current admin session
 - `/api/queue`, `/api/reports/overview`, workflow mutations, and realtime all resolve on that same origin
 
-GitHub Pages is kept as a companion project page only:
-- it links to the live product at `https://cobe.aparcedo.org`
-- it gives a quick project overview and local run instructions
-- it is not the operator runtime
-
 Not supported as the primary product path:
+- GitHub Pages
 - static-only Vercel/Netlify style hosting without the Express runtime
 - split frontend/backend deployments that rely on an undocumented browser proxy
 
@@ -128,7 +123,6 @@ Not supported as the primary product path:
 - [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - [docs/SOP.md](./docs/SOP.md)
-- [docs/github-pages/index.html](./docs/github-pages/index.html)
 
 ## Differentiation
 
