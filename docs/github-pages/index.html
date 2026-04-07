@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>COBE Funnel Ops</title>
+    <meta
+      name="description"
+      content="Operator console for DM intake, no-show recovery, and revenue visibility."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --panel: rgba(22, 27, 34, 0.92);
+        --panel-strong: #161b22;
+        --line: rgba(110, 118, 129, 0.28);
+        --text: #e6edf3;
+        --muted: #9da7b3;
+        --accent: #58a6ff;
+        --accent-strong: #1f6feb;
+        --success: #3fb950;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(88, 166, 255, 0.16), transparent 34%),
+          linear-gradient(180deg, #0b0f14 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+
+      .shell {
+        width: min(1080px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 40px 0 64px;
+      }
+
+      .hero,
+      .section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 28px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+      }
+
+      .section {
+        margin-top: 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(31, 111, 235, 0.14);
+        border: 1px solid rgba(88, 166, 255, 0.28);
+        color: #c8ddff;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        margin-top: 16px;
+        font-size: clamp(2rem, 4vw, 3.5rem);
+        line-height: 1.05;
+      }
+
+      .lede {
+        margin-top: 14px;
+        max-width: 720px;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.6;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 18px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .button-primary {
+        background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+      }
+
+      .button-secondary {
+        background: transparent;
+        border-color: var(--line);
+      }
+
+      .stats,
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .stats {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin-top: 24px;
+      }
+
+      .stat,
+      .card {
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px;
+      }
+
+      .stat strong,
+      .card strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 0.95rem;
+      }
+
+      .stat span,
+      .card span,
+      .card p,
+      li {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin-top: 18px;
+      }
+
+      h2 {
+        font-size: 1.2rem;
+      }
+
+      ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      .footer {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .status {
+        color: var(--success);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">COBE operator console</div>
+        <h1>DM intake, recovery, and revenue visibility in one operator surface.</h1>
+        <p class="lede">
+          COBE Funnel Ops is a same-origin React + Express console for creator funnel teams. It
+          keeps DM qualification, no-show recovery, payload validation, and operator audit trails
+          in one live system.
+        </p>
+        <div class="actions">
+          <a class="button button-primary" href="https://cobe.aparcedo.org">Open live app</a>
+          <a class="button button-secondary" href="https://github.com/Josue7211/cobe-funnel-ops">View repo</a>
+        </div>
+        <div class="stats">
+          <article class="stat">
+            <strong>Production</strong>
+            <span class="status">https://cobe.aparcedo.org</span>
+          </article>
+          <article class="stat">
+            <strong>Runtime contract</strong>
+            <span>One origin. Express serves the SPA and `/api/*` together.</span>
+          </article>
+          <article class="stat">
+            <strong>Local start</strong>
+            <span>`npm install` then `npm run dev`</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>What it includes</h2>
+        <div class="grid">
+          <article class="card">
+            <strong>DM Workbench</strong>
+            <p>Lead intake, qualification, routing, and checkout handoff.</p>
+          </article>
+          <article class="card">
+            <strong>Recovery Branch</strong>
+            <p>No-show escalation, rebooking, and recovery-state visibility.</p>
+          </article>
+          <article class="card">
+            <strong>Payload Lab</strong>
+            <p>Webhook payloads, relay checks, and revenue event naming.</p>
+          </article>
+          <article class="card">
+            <strong>Systems Drawer</strong>
+            <p>Inbox, rules, metrics, and operator triage surfaces.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Run it locally</h2>
+        <ul>
+          <li>Use Node 22+.</li>
+          <li>Install dependencies with `npm install`.</li>
+          <li>Start the same-origin dev stack with `npm run dev`.</li>
+          <li>Build production assets with `npm run build`.</li>
+          <li>Run the production-like server with `npm start`.</li>
+        </ul>
+        <p class="footer">
+          GitHub Pages is a companion page only. The real operator runtime lives at
+          <span class="status"> https://cobe.aparcedo.org</span>.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

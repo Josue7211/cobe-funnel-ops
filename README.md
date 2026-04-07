@@ -1,6 +1,10 @@
-# Creator Funnel Ops
+# COBE Funnel Ops
 
-`creator-funnel-ops` is a compact operator console for creator funnel ops: lead capture to checkout, call recovery, and revenue visibility.
+`cobe-funnel-ops` is a compact operator console for creator funnel ops: lead capture to checkout, call recovery, and revenue visibility.
+
+Live URLs:
+- Production app: `https://cobe.aparcedo.org`
+- GitHub Pages companion: `https://josue7211.github.io/cobe-funnel-ops/`
 
 Supported runtime contract:
 - one Node-capable deployment
@@ -98,13 +102,22 @@ Phase 1 supports one honest deployment topology:
 
 Equivalent reverse-proxy setups are fine if the browser still sees one origin for the app shell and API.
 
+Production target:
+- `https://cobe.aparcedo.org`
+- one Node/Express runtime serving both the SPA and `/api/*`
+- current server shape in this repo is Docker + Node + SQLite with Portainer-compatible compose in [`deploy/portainer-compose.yml`](./deploy/portainer-compose.yml)
+
 Required behavior for a supported deployment:
 - `/` returns the built operator console
 - `/api/auth/session` checks the current admin session
 - `/api/queue`, `/api/reports/overview`, workflow mutations, and realtime all resolve on that same origin
 
+GitHub Pages is kept as a companion project page only:
+- it links to the live product at `https://cobe.aparcedo.org`
+- it gives a quick project overview and local run instructions
+- it is not the operator runtime
+
 Not supported as the primary product path:
-- GitHub Pages
 - static-only Vercel/Netlify style hosting without the Express runtime
 - split frontend/backend deployments that rely on an undocumented browser proxy
 
@@ -115,6 +128,7 @@ Not supported as the primary product path:
 - [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - [docs/SOP.md](./docs/SOP.md)
+- [docs/github-pages/index.html](./docs/github-pages/index.html)
 
 ## Differentiation
 
