@@ -1,4 +1,5 @@
 # COBE Funnel Ops
+<img width="2507" height="1237" alt="image" src="https://github.com/user-attachments/assets/8d30f539-104e-4d8d-a398-4ad6594acbdf" />
 
 `cobe-funnel-ops` is a compact operator console for creator funnel ops: lead capture to checkout, call recovery, and revenue visibility.
 
