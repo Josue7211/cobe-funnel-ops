@@ -46,6 +46,7 @@ import {
   operatorToolTemplates,
   repoModules,
 } from './data'
+import { getRecoveryDisplayModel } from './recoveryDisplay'
 import type {
   Booking,
   Conversation,
@@ -54,6 +55,11 @@ import type {
   OnboardingRun,
   OperatorToolTemplate,
 } from './types'
+import type {
+  RecoveryEscalationTone,
+  RecoveryRailCardTone,
+  RecoveryStatusTone,
+} from './recoveryDisplay'
 
 type ScenarioRuntime = {
   stepLabels: string[]
@@ -142,6 +148,11 @@ type IntegrationInboxEntry = {
   effect?: string
 }
 
+type LifecycleStageProfile = {
+  phases: LifecyclePhase[]
+  max: number
+}
+
 type AuditEvent = {
   id: string
   kind: AuditKind
@@ -181,15 +192,6 @@ type QueueLead = {
   tags: string[]
   source: string
   offer: string
-}
-
-type GhlPipelinePhaseState = 'upcoming' | 'active' | 'complete'
-
-type GhlPipelineStateModelItem = {
-  id: string
-  label: string
-  summary: string
-  state: GhlPipelinePhaseState
 }
 
 type RecoveryEscalationSignal = {
@@ -469,92 +471,18 @@ function lifecyclePhaseLabel(phase: LifecyclePhase) {
   }[phase]
 }
 
-function mapPipelineStateStatus(
-  lead: Lead | QueueLead | null,
-  bookingStatus: string | null | undefined,
-): GhlPipelineStateModelItem[] {
-  if (!lead) {
-    return []
-  }
-  const normalizedStatus = normalizeBookingStatus(bookingStatus)
-  const stage = lead?.stage
-  const owner = lead?.owner || 'Unassigned'
-  const lane = 'lane' in lead ? lead.lane ?? 'qualification' : 'qualification'
-  const hasBooking = Boolean(bookingStatus)
-  const isWon = stage === 'won'
-  const isNoShow = stage === 'no-show' || normalizedStatus === 'no-show'
-  const isRecovered = normalizedStatus === 'recovered'
-  const isRescheduled = normalizedStatus === 'rescheduled'
-  const isBooked = hasBooking || stage === 'booked' || stage === 'checkout-sent' || stage === 'no-show' || stage === 'recovery'
-  const isInRecovery = stage === 'recovery' || isNoShow || isRecovered
-  const activeState = isWon
-    ? 'won'
-    : isRecovered
-      ? 'recovered'
-      : isRescheduled
-        ? 'rescheduled'
-        : isInRecovery
-          ? 'recovery'
-          : isNoShow
-            ? 'no-show'
-            : isBooked
-              ? 'booked'
-              : 'booked'
+type RecoverySignalTone = RecoveryStatusTone | RecoveryEscalationTone | RecoveryRailCardTone
 
-  return [
-    {
-      id: 'booked',
-      label: 'Booked',
-      summary: `Booked consult and routed to ${owner}${lane === 'consult' ? ' for closer coverage' : ''}.`,
-      state:
-        activeState === 'booked'
-          ? 'active'
-          : isBooked
-            ? 'complete'
-            : 'upcoming',
-    },
-    {
-      id: 'no-show',
-      label: 'No-show',
-      summary: isNoShow
-        ? 'Attendance miss detected; escalation branch is live.'
-        : 'Waiting for attendance timeout before recovery escalation.',
-      state:
-        activeState === 'no-show'
-          ? 'active'
-          : isNoShow || isRecovered || stage === 'recovery'
-            ? 'complete'
-            : 'upcoming',
-    },
-    {
-      id: 'recovery',
-      label: 'Recovery',
-      summary: isInRecovery ? 'No-show branch active with queued proof+reschedule sequence.' : 'Recovery not triggered yet.',
-      state: activeState === 'recovery' ? 'active' : isInRecovery ? 'complete' : 'upcoming',
-    },
-    {
-      id: 'recovered',
-      label: 'Recovered',
-      summary: isRecovered
-        ? 'Lead converted from no-show through recovery workflow.'
-        : 'Rebook is pending if follow-up succeeds.',
-      state: isRecovered ? (activeState === 'recovered' ? 'active' : 'complete') : 'upcoming',
-    },
-    {
-      id: 'rescheduled',
-      label: 'Rescheduled',
-      summary: isRescheduled
-        ? 'Consult is rescheduled and reminder coverage restarted.'
-        : 'Reschedule path not taken yet.',
-      state: isRescheduled ? (activeState === 'rescheduled' ? 'active' : 'complete') : 'upcoming',
-    },
-    {
-      id: 'won',
-      label: 'Won',
-      summary: isWon ? 'Lead promoted to onboarding and revenue trail.' : 'Conversion pending.',
-      state: isWon ? 'active' : isRecovered ? 'complete' : 'upcoming',
-    },
-  ]
+function recoveryToneToSignalClass(tone: RecoverySignalTone) {
+  if (tone === 'critical') {
+    return 'signal-critical'
+  }
+
+  if (tone === 'warning' || tone === 'watch') {
+    return 'signal-watch'
+  }
+
+  return 'signal-normal'
 }
 
 function resolveRoutingLane(
@@ -674,6 +602,12 @@ function extractNoShowEscalationSignals(events: LeadTimelineEntry[]) {
 }
 
 type ConnectorReplayRecipe = 'dm-sprint' | 'ghl-recovery' | 'stripe-capi' | 'onboarding'
+
+const workbenchScenarioMap = {
+  funnel: 'scenario-001',
+  recovery: 'scenario-002',
+  payload: 'scenario-003',
+} satisfies Record<WorkbenchTab, string>
 
 type ConnectorInspectorProfile = {
   trigger: string
@@ -854,6 +788,27 @@ const scenarioRuntimes: Record<string, ScenarioRuntime> = {
   },
 }
 
+const lifecycleStageProfiles: Record<string, LifecycleStageProfile[]> = {
+  'scenario-001': [
+    { phases: ['intake'], max: 1 },
+    { phases: ['intake', 'routing'], max: 2 },
+    { phases: ['intake', 'routing', 'payment'], max: 3 },
+    { phases: ['intake', 'routing', 'payment'], max: 3 },
+  ],
+  'scenario-002': [
+    { phases: ['booking'], max: 1 },
+    { phases: ['booking'], max: 1 },
+    { phases: ['booking'], max: 1 },
+    { phases: ['booking', 'routing', 'alert'], max: 2 },
+  ],
+  'scenario-003': [
+    { phases: ['payment'], max: 1 },
+    { phases: ['payment'], max: 1 },
+    { phases: ['payment', 'onboarding'], max: 2 },
+    { phases: ['payment', 'onboarding', 'booking'], max: 3 },
+  ],
+}
+
 const interviewGuideSteps: InterviewGuideStep[] = [
   {
     id: 'onboarding',
@@ -918,6 +873,10 @@ const interviewGuideSteps: InterviewGuideStep[] = [
 ]
 
 const STORAGE_KEY = 'creator-funnel-ops-state'
+const DEFAULT_PROOF_SCENARIO_ID = 'scenario-003'
+const DEFAULT_PROOF_LEAD_ID = 'lead-003'
+const DEFAULT_PROOF_WORKBENCH_TAB: WorkbenchTab = 'payload'
+const DEFAULT_PROOF_RAIL_TAB: RailTab = 'operations'
 
 function readPersistedState() {
   if (typeof window === 'undefined') {
@@ -942,9 +901,9 @@ function App() {
     ...rule,
     enabled: true,
   }))
-  const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? demoScenarios[0].id)
+  const [scenarioId, setScenarioId] = useState(persisted?.scenarioId ?? DEFAULT_PROOF_SCENARIO_ID)
   const [stepIndex, setStepIndex] = useState(persisted?.stepIndex ?? 0)
-  const [selectedLeadId, setSelectedLeadId] = useState(persisted?.selectedLeadId ?? '')
+  const [selectedLeadId, setSelectedLeadId] = useState(persisted?.selectedLeadId ?? DEFAULT_PROOF_LEAD_ID)
   const [leadQuery, setLeadQuery] = useState(persisted?.leadQuery ?? '')
   const [leadStageFilter, setLeadStageFilter] = useState<FunnelStage | 'all'>(
     persisted?.leadStageFilter ?? 'all',
@@ -954,7 +913,7 @@ function App() {
   )
   const [operatorNotes, setOperatorNotes] = useState(persisted?.operatorNotes ?? '')
   const [webhookInput, setWebhookInput] = useState(
-    JSON.stringify(scenarioRuntimes[demoScenarios[0].id].payloads[0], null, 2),
+    JSON.stringify(scenarioRuntimes[DEFAULT_PROOF_SCENARIO_ID].payloads[0], null, 2),
   )
   const [leadRecords, setLeadRecords] = useState<Lead[]>([])
   const [conversationRecords, setConversationRecords] = useState<Conversation[]>([])
@@ -983,14 +942,16 @@ function App() {
     message: string
   } | null>(null)
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>(
-    persisted?.workbenchTab ?? 'recovery',
+    persisted?.workbenchTab ?? DEFAULT_PROOF_WORKBENCH_TAB,
   )
-  const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? 'operations')
+  const [railTab, setRailTab] = useState<RailTab>(persisted?.railTab ?? DEFAULT_PROOF_RAIL_TAB)
   const [interviewMode, setInterviewMode] = useState(Boolean(persisted?.interviewMode ?? false))
   const [secondaryPanel, setSecondaryPanel] = useState<'systems' | 'notes' | 'workflow' | null>(null)
   const [selectedConnectorName, setSelectedConnectorName] = useState(
     persisted?.selectedConnectorName ?? automationConnectors[0]?.name ?? 'Zapier',
   )
+  const [selectedSnippetLabel, setSelectedSnippetLabel] = useState('JavaScript glue')
+  const [payloadProofOpen, setPayloadProofOpen] = useState(false)
   const [dashboardSummary, setDashboardSummary] = useState<{
     leadsToday: number
     bookedCalls: number
@@ -1071,10 +1032,12 @@ function App() {
   const activeQueueLead = queueRecords.find((entry) => entry.id === activeLead?.id) ?? null
   const activeScenario = useMemo(
     () =>
-      demoScenarios.find((scenario) => scenario.id === inferScenarioIdFromStage(activeLead?.stage)) ??
       demoScenarios.find((scenario) => scenario.id === scenarioId) ??
+      demoScenarios.find((scenario) => scenario.id === workbenchScenarioMap[workbenchTab]) ??
+      demoScenarios.find((scenario) => scenario.id === inferScenarioIdFromStage(activeLead?.stage)) ??
+      demoScenarios.find((scenario) => scenario.id === workbenchScenarioMap.funnel) ??
       demoScenarios[0],
-    [activeLead?.stage, scenarioId],
+    [activeLead?.stage, scenarioId, workbenchTab],
   )
   const runtime = scenarioRuntimes[activeScenario.id]
   const activeConversation =
@@ -1125,12 +1088,6 @@ function App() {
       )
     : []
   const activeLeadId = activeLead?.id ?? null
-  const activeGhlRoutingLead = activeQueueLead ?? activeLead
-  const activeBookingStatus = activeBooking?.status ?? null
-  const activeGhlPipeline = useMemo(
-    () => mapPipelineStateStatus(activeGhlRoutingLead, activeBookingStatus),
-    [activeGhlRoutingLead, activeBookingStatus],
-  )
   const noShowEscalationSignals = useMemo(
     () => extractNoShowEscalationSignals(activeLeadTimeline),
     [activeLeadTimeline],
@@ -1138,6 +1095,15 @@ function App() {
   const activeRoutingDecision = useMemo(
     () => deriveRoutingDecision(activeLead, activeBooking, activeQueueLead, noShowEscalationSignals),
     [activeLead, activeBooking, activeQueueLead, noShowEscalationSignals],
+  )
+  const recoveryDisplayModel = useMemo(
+    () =>
+      getRecoveryDisplayModel({
+        lead: activeLead,
+        booking: activeBooking,
+        escalationSignalCount: noShowEscalationSignals.length,
+      }),
+    [activeLead, activeBooking, noShowEscalationSignals.length],
   )
   const isNoShowEscalationLive = noShowEscalationSignals.length > 0
   const noShowEscalationText = isNoShowEscalationLive
@@ -1210,15 +1176,15 @@ function App() {
   const activeLeadLifecycleEntries = useMemo(
     () =>
       activeLeadId
-        ? integrationInboxEntries.filter((entry) => entry.leadId === activeLeadId).slice(0, 6)
+        ? integrationInboxEntries.filter((entry) => entry.leadId === activeLeadId)
         : [],
     [activeLeadId, integrationInboxEntries],
   )
   const activeLeadLifecycleNodes = useMemo(
-    () =>
-      activeLeadLifecycleEntries.map((entry) => {
+    () => {
+      const mappedNodes = activeLeadLifecycleEntries.map((entry) => {
         const haystack = `${entry.kind} ${entry.source} ${entry.target} ${entry.summary} ${entry.effect ?? ''}`.toLowerCase()
-        const phase =
+        const phase: LifecyclePhase =
           haystack.includes('purchase') || haystack.includes('stripe')
             ? 'payment'
             : haystack.includes('onboarding') || haystack.includes('kajabi') || haystack.includes('skool')
@@ -1249,8 +1215,32 @@ function App() {
           title: entry.summary.split(' • ')[0] || entry.summary,
           target,
         }
-      }),
-    [activeLeadLifecycleEntries],
+      })
+
+      const visibleIds = runtime.visibleEventIds[stepIndex] ?? []
+      const matchedById = visibleIds.length
+        ? mappedNodes.filter((node) => visibleIds.some((id) => node.id === id || node.id.endsWith(id)))
+        : []
+      if (matchedById.length) {
+        return matchedById.slice(0, 6)
+      }
+
+      const stageProfile =
+        lifecycleStageProfiles[activeScenario.id]?.[stepIndex] ??
+        lifecycleStageProfiles[activeScenario.id]?.[0] ??
+        null
+      if (!stageProfile) {
+        return mappedNodes.slice(0, 6)
+      }
+
+      const filteredByPhase = mappedNodes.filter((node) => stageProfile.phases.includes(node.phase))
+      if (filteredByPhase.length) {
+        return filteredByPhase.slice(0, stageProfile.max)
+      }
+
+      return mappedNodes.slice(0, stageProfile.max)
+    },
+    [activeLeadLifecycleEntries, activeScenario.id, runtime.visibleEventIds, stepIndex],
   )
   const integrationInboxSources = useMemo(
     () => ['all', ...new Set(integrationInboxEntries.map((entry) => entry.source))],
@@ -1565,14 +1555,6 @@ function App() {
       }
     })
   }, [activeLead?.handle, deliveryQueue])
-  const activeInterviewStep = useMemo(
-    () =>
-      interviewGuideSteps.find(
-        (step) =>
-          step.railTab === railTab && step.workbenchTab === workbenchTab && step.scenarioId === scenarioId,
-      ) ?? interviewGuideSteps[0],
-    [railTab, scenarioId, workbenchTab],
-  )
   const attentionConnectors = useMemo(
     () =>
       Object.entries(connectorStates)
@@ -1733,7 +1715,8 @@ if status == no-show:
       { label: 'GHL routing', body: ghlSnippet },
     ]
   }, [activeBooking?.slot, activeLead?.handle, activeLead?.offer, activeLead?.source, activePayload])
-
+  const activeImplementationSnippet =
+    implementationSnippets.find((snippet) => snippet.label === selectedSnippetLabel) ?? implementationSnippets[0]
   const clearLiveConsoleState = useCallback(() => {
     setLeadRecords([])
     setConversationRecords([])
@@ -1890,8 +1873,11 @@ if status == no-show:
       .then((queue) => {
         if (!cancelled) {
           setQueueRecords(queue)
-          if (!selectedLeadId && queue[0]?.id) {
-            setSelectedLeadId(queue[0].id)
+          if (!selectedLeadId) {
+            const preferredLead = queue.find((entry) => entry.id === DEFAULT_PROOF_LEAD_ID) ?? queue[0]
+            if (preferredLead?.id) {
+              setSelectedLeadId(preferredLead.id)
+            }
           }
           if (!queue[0]?.id) {
             setSelectedLeadId('')
@@ -2169,6 +2155,22 @@ if status == no-show:
       detail: `Moved to ${runtime.stepLabels[boundedStep]} for ${activeScenario.title}.`,
       target: activeScenario.id,
     })
+  }
+
+  const handleWorkbenchTabChange = (nextTab: WorkbenchTab) => {
+    const nextScenarioId = workbenchScenarioMap[nextTab]
+    const nextRuntime = scenarioRuntimes[nextScenarioId]
+    const nextScenario = demoScenarios.find((scenario) => scenario.id === nextScenarioId)
+    const boundedStep = Math.max(0, Math.min(stepIndex, nextRuntime.stepLabels.length - 1))
+
+    setWorkbenchTab(nextTab)
+    setScenarioId(nextScenarioId)
+    if (nextScenario?.leadId) {
+      setSelectedLeadId(nextScenario.leadId)
+    }
+    setStepIndex(boundedStep)
+    setWebhookInput(JSON.stringify(nextRuntime.payloads[boundedStep], null, 2))
+    setWebhookResult(null)
   }
 
   const focusScenario = (nextScenarioId: string) => {
@@ -2912,17 +2914,17 @@ if status == no-show:
       setQueueRecords(nextQueue)
       setReportsOverview(nextReports)
       setToolArtifact(null)
-      const nextLead = nextQueue.find((entry) => entry.id === 'lead-001') ?? nextQueue[0] ?? null
+      const nextLead = nextQueue.find((entry) => entry.id === DEFAULT_PROOF_LEAD_ID) ?? nextQueue[0] ?? null
       setSelectedLeadId(nextLead?.id ?? '')
-      const nextScenarioId = nextLead ? inferScenarioIdFromStage(nextLead.stage) : demoScenarios[0].id
+      const nextScenarioId = nextLead ? inferScenarioIdFromStage(nextLead.stage) : DEFAULT_PROOF_SCENARIO_ID
       setScenarioId(nextScenarioId)
       setWebhookInput(JSON.stringify(scenarioRuntimes[nextScenarioId].payloads[0], null, 2))
-      setWorkbenchTab('funnel')
-      setRailTab('operations')
+      setWorkbenchTab(DEFAULT_PROOF_WORKBENCH_TAB)
+      setRailTab(DEFAULT_PROOF_RAIL_TAB)
       setStepIndex(0)
       setWebhookResult({
         status: 'accepted',
-        message: 'Runtime reset to the seeded interview dataset.',
+        message: 'Runtime reset to the seeded payment-to-onboarding proof path.',
       })
       markRuntimeReady()
     } catch (error) {
@@ -3528,7 +3530,11 @@ if status == no-show:
           </div>
         </aside>
 
-        <section className="console-panel workspace-panel">
+        <section
+          className={`console-panel workspace-panel ${
+            workbenchTab === 'payload' ? 'workspace-panel-payload' : ''
+          }`}
+        >
           {!hasLiveLead ? (
             <div className="queue-empty-state">
               <p className="mini-label">
@@ -3600,15 +3606,15 @@ if status == no-show:
                       className={`surface-card surface-card-tight lifecycle-node lifecycle-node-${node.phase}`}
                       title={node.effect ?? node.summary}
                     >
-                      <div className="section-topline">
+                      <div className="lifecycle-node-inner">
                         <div className="lifecycle-node-copy lifecycle-node-copy-primary">
                           <span className="mini-label">{node.phase}</span>
-                          <h4>{node.title}</h4>
+                          <span className="lifecycle-node-title">{node.title}</span>
                           <span className="timeline-meta lifecycle-node-meta">
                             {node.source} • {node.timestamp}
                           </span>
                         </div>
-                        <div className="command-cluster">
+                        <div className="command-cluster lifecycle-node-actions">
                           <span className={`connector-status ${getIntegrationInboxStatusClass(node.status)}`}>
                             {node.status}
                           </span>
@@ -3715,7 +3721,7 @@ if status == no-show:
                 key={value}
                 type="button"
                 className={`tab-button ${workbenchTab === value ? 'tab-button-active' : ''}`}
-                onClick={() => setWorkbenchTab(value as WorkbenchTab)}
+                onClick={() => handleWorkbenchTabChange(value as WorkbenchTab)}
               >
                 {label}
               </button>
@@ -3864,117 +3870,118 @@ if status == no-show:
           ) : null}
 
           {workbenchTab === 'recovery' ? (
-            <div className="stage-layout">
-              <section className="stage-panel stage-panel-primary">
-                <div className="section-topline">
-                  <div>
-                    <p className="mini-label">Recovery state</p>
-                    <h3>{activeLead?.name ?? 'No live recovery state loaded'}</h3>
-                    <p className="timeline-meta">{activeBooking?.slot ?? 'No call slot required'}</p>
-                  </div>
-                  <span className={`booking-status booking-${runtime.bookingStatuses[stepIndex]}`}>
-                    {runtime.bookingStatuses[stepIndex]}
-                  </span>
-                </div>
-
-                <p className="booking-owner">Closer: {activeLead?.owner ?? 'Unassigned'}</p>
-                <p className="booking-copy">
-                  {activeRoutingDecision.note ??
-                    'Payment path skips call handling and moves directly into onboarding automation.'}
-                </p>
-
-                <p className="mini-label">GHL pipeline model</p>
-                <div className="pipeline-model">
-                  {activeGhlPipeline.length === 0 ? (
-                    <p className="timeline-meta">Load a live lead to view its GHL pipeline state model.</p>
-                  ) : (
-                    activeGhlPipeline.map((entry) => (
-                      <article key={entry.id} className={`pipeline-state pipeline-state-${entry.state}`}>
-                        <div className="section-topline">
-                          <p className="pipeline-state-label">{entry.label}</p>
-                          <span className={`status-pill status-${entry.state}`}>{entry.state}</span>
-                        </div>
-                        <p className="booking-copy">{entry.summary}</p>
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              <aside className="workspace-actions-rail">
-                <article className="stage-panel">
-                  <div className="section-topline">
-                    <div>
-                      <p className="mini-label">Recovery playbook</p>
-                      <h3>Queued actions</h3>
+            hasLiveLead ? (
+              <div className="recovery-console">
+                <div className="recovery-console-main">
+                  <section className="stage-panel stage-panel-primary recovery-main-panel">
+                    <div className="section-topline">
+                      <div>
+                        <p className="mini-label">Recovery state</p>
+                        <h3>{activeLead?.name ?? 'No live recovery state loaded'}</h3>
+                        <p className="timeline-meta">{activeBooking?.slot ?? 'No call slot required'}</p>
+                      </div>
+                      <span className={`signal-badge ${recoveryToneToSignalClass(recoveryDisplayModel.statusTone)}`}>
+                        {recoveryDisplayModel.headerStatus}
+                      </span>
                     </div>
-                    <span className="signal-badge signal-critical">ghl branch</span>
-                  </div>
-                  <ol className="scenario-steps">
-                    {(activeLeadTimeline.length
-                      ? activeLeadTimeline.slice(0, 4).map((entry) => entry.detail)
-                      : activeScenario.steps
-                    ).map((step) => (
-                      <li key={step}>{step}</li>
-                    ))}
-                  </ol>
-                </article>
 
-                <article className="stage-panel">
-                  <div className="section-topline">
-                    <div>
-                      <p className="mini-label">Routing + escalation</p>
-                      <h3>Routing visibility</h3>
+                    <p className="booking-owner">Closer: {activeLead?.owner ?? 'Unassigned'}</p>
+                    <p className="booking-copy">{recoveryDisplayModel.summary}</p>
+
+                    <div className="section-topline">
+                      <div>
+                        <p className="mini-label">Recovery model</p>
+                        <h3>{recoveryDisplayModel.headerStatus}</h3>
+                      </div>
+                      <span className={`signal-badge ${recoveryToneToSignalClass(recoveryDisplayModel.escalationTone)}`}>
+                        {recoveryDisplayModel.escalationLabel}
+                      </span>
                     </div>
-                    <span className={`signal-badge ${isNoShowEscalationLive ? 'signal-critical' : 'signal-watch'}`}>
-                      {isNoShowEscalationLive ? 'Escalation active' : 'No-show waiting'}
-                    </span>
-                  </div>
-                  <div className="routing-grid">
-                    <article className="routing-card">
-                      <p className="mini-label">Owner</p>
-                      <p className="booking-copy">{activeRoutingDecision.owner}</p>
-                    </article>
-                    <article className="routing-card">
-                      <p className="mini-label">Lane</p>
-                      <p className="booking-copy">{activeRoutingDecision.lane}</p>
-                    </article>
-                    <article className="routing-card">
-                      <p className="mini-label">Rule</p>
-                      <p className="booking-copy">{activeRoutingDecision.ruleLabel}</p>
-                    </article>
-                  </div>
-                  <p className="booking-copy">{noShowEscalationText}</p>
-                  {noShowEscalationSignals.length === 0 ? null : (
-                    <ul className="recovery-signal-list">
-                      {noShowEscalationSignals.map((signal) => (
-                        <li key={signal.id} className={`recovery-signal recovery-signal-${signal.kind}`}>
+
+                    <div className="pipeline-model recovery-pipeline-model">
+                      {recoveryDisplayModel.pipeline.map((entry) => (
+                        <article key={entry.label} className={`pipeline-state pipeline-state-${entry.state}`}>
                           <div className="section-topline">
-                            <p>{signal.title}</p>
-                            <span
-                              className={`signal-badge ${
-                                signal.kind === 'booking'
-                                  ? 'signal-critical'
-                                  : signal.kind === 'delivery'
-                                    ? 'signal-watch'
-                                    : signal.kind === 'audit'
-                                      ? 'signal-hot'
-                                      : 'signal-normal'
-                              }`}
-                            >
-                              {signal.kind}
-                            </span>
+                            <p className="pipeline-state-label">{entry.label}</p>
+                            <span className={`status-pill status-${entry.state}`}>{entry.state}</span>
                           </div>
-                          <p className="timeline-meta">
-                            {signal.timestamp} • {signal.detail}
-                          </p>
-                        </li>
+                          <p className="booking-copy">{entry.summary}</p>
+                        </article>
                       ))}
-                    </ul>
-                  )}
-                </article>
+                    </div>
+                  </section>
 
-                <article className="stage-panel">
+                  <aside className="workspace-actions-rail recovery-summary-rail">
+                    <article className="stage-panel recovery-summary-card recovery-summary-card-routing">
+                      <div className="section-topline">
+                        <div>
+                          <p className="mini-label">Routing + escalation</p>
+                          <h3>Routing visibility</h3>
+                        </div>
+                        <span className={`signal-badge ${recoveryToneToSignalClass(recoveryDisplayModel.escalationTone)}`}>
+                          {recoveryDisplayModel.escalationLabel}
+                        </span>
+                      </div>
+                      <div className="routing-grid">
+                        <article className="routing-card">
+                          <p className="mini-label">Owner</p>
+                          <p className="booking-copy">{activeRoutingDecision.owner}</p>
+                        </article>
+                        <article className="routing-card">
+                          <p className="mini-label">Lane</p>
+                          <p className="booking-copy">{activeRoutingDecision.lane}</p>
+                        </article>
+                        <article className="routing-card">
+                          <p className="mini-label">Rule</p>
+                          <p className="booking-copy">{activeRoutingDecision.ruleLabel}</p>
+                        </article>
+                      </div>
+                      <p className="booking-copy">{noShowEscalationText}</p>
+                      {noShowEscalationSignals.length === 0 ? null : (
+                        <ul className="recovery-signal-list">
+                          {noShowEscalationSignals.map((signal) => (
+                            <li key={signal.id} className={`recovery-signal recovery-signal-${signal.kind}`}>
+                              <div className="section-topline">
+                                <p>{signal.title}</p>
+                                <span
+                                  className={`signal-badge ${
+                                    signal.kind === 'booking'
+                                      ? 'signal-critical'
+                                      : signal.kind === 'delivery'
+                                        ? 'signal-watch'
+                                        : signal.kind === 'audit'
+                                          ? 'signal-hot'
+                                          : 'signal-normal'
+                                  }`}
+                                >
+                                  {signal.kind}
+                                </span>
+                              </div>
+                              <p className="timeline-meta">
+                                {signal.timestamp} • {signal.detail}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </article>
+
+                    {recoveryDisplayModel.railCards.map((card) => (
+                      <article key={card.title} className={`stage-panel recovery-rail-card recovery-rail-card-${card.tone}`}>
+                        <div className="section-topline">
+                          <div>
+                            <p className="mini-label">{card.eyebrow}</p>
+                            <h3>{card.title}</h3>
+                          </div>
+                          <span className={`signal-badge ${recoveryToneToSignalClass(card.tone)}`}>{card.tone}</span>
+                        </div>
+                        <p className="booking-copy">{card.body}</p>
+                      </article>
+                    ))}
+                  </aside>
+                </div>
+
+                <section className="stage-panel recovery-console-automation">
                   <div className="section-topline">
                     <div>
                       <p className="mini-label">Triggered events</p>
@@ -3995,9 +4002,9 @@ if status == no-show:
                       </p>
                     ) : (
                       activeLeadTimeline.slice(0, 3).map((entry) => (
-                        <article key={entry.id} className="timeline-card">
-                          <div className="section-topline">
-                            <div>
+                        <article key={entry.id} className="timeline-card recovery-automation-card">
+                          <div className="recovery-automation-card-header">
+                            <div className="recovery-automation-card-copy">
                               <p className="event-name">{entry.title}</p>
                               <p className="timeline-meta">
                                 {entry.type} • {entry.timestamp}
@@ -4005,14 +4012,32 @@ if status == no-show:
                             </div>
                             <span className={`event-status event-${entry.type}`}>{entry.type}</span>
                           </div>
-                          <p>{entry.detail}</p>
+                          <p className="booking-copy">{entry.detail}</p>
                         </article>
                       ))
                     )}
                   </div>
-                </article>
-              </aside>
-            </div>
+                </section>
+              </div>
+            ) : (
+              <section className="stage-panel stage-panel-primary recovery-empty-state">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Recovery branch</p>
+                    <h3>No live recovery lead loaded</h3>
+                  </div>
+                  <span className="signal-badge signal-watch">Empty state</span>
+                </div>
+                <p className="booking-copy">
+                  Select a live lead or load authenticated recovery data to see the four-step ladder, routing
+                  visibility, and automation trail.
+                </p>
+                <p className="timeline-meta">
+                  The tab stays empty until recovery data is available, so it will not synthesize ladder rows or rail
+                  content.
+                </p>
+              </section>
+            )
           ) : null}
 
           {workbenchTab === 'payload' ? (
@@ -4059,23 +4084,25 @@ if status == no-show:
                 ) : null}
               </section>
 
-              <aside className="workspace-actions-rail">
-                <article className="stage-panel">
-                  <div className="section-topline">
-                    <div>
-                      <p className="mini-label">Webhook inbox</p>
-                      <h3>Replayable events</h3>
-                    </div>
-                    <span className="status-pill">{webhookHistory.length} stored</span>
+              <section className="stage-panel payload-utility-panel">
+                <div className="section-topline">
+                  <div>
+                    <p className="mini-label">Webhook inbox</p>
+                    <h3>Replayable events</h3>
                   </div>
-                  <div className="webhook-list">
-                    {webhookHistory.map((item) => (
-                      <article key={item.id} className="webhook-item">
-                        <div>
-                          <p className="event-name">{item.label}</p>
-                          <p className="timeline-meta">{item.id}</p>
+                  <span className="status-pill">{webhookHistory.length} stored</span>
+                </div>
+                <div className="payload-event-list">
+                  {webhookHistory.map((item) => {
+                    return (
+                      <article key={item.id} className="payload-event-row">
+                        <div className="payload-event-main">
+                          <div className="payload-event-copy">
+                            <p className="event-name">{item.label}</p>
+                            <p className="timeline-meta">{item.id}</p>
+                          </div>
                         </div>
-                        <div className="command-cluster">
+                        <div className="command-cluster payload-event-actions">
                           <button
                             type="button"
                             className="button button-secondary button-small"
@@ -4098,27 +4125,44 @@ if status == no-show:
                           </button>
                         </div>
                       </article>
-                    ))}
-                  </div>
-                </article>
+                    )
+                  })}
+                </div>
+              </section>
 
-                <article className="stage-panel">
-                  <div className="section-topline">
-                    <div>
-                      <p className="mini-label">Implementation snippets</p>
-                      <h3>Glue code proof</h3>
-                    </div>
-                  </div>
-                  <div className="snippet-stack">
+              <section className={`payload-proof-drawer ${payloadProofOpen ? 'payload-proof-drawer-open' : ''}`}>
+                <button
+                  type="button"
+                  className="payload-proof-toggle"
+                  onClick={() => setPayloadProofOpen((current) => !current)}
+                  aria-expanded={payloadProofOpen}
+                >
+                  <span>Implementation snippets</span>
+                  <span className="timeline-meta">Glue code proof</span>
+                </button>
+                {payloadProofOpen ? (
+                  <div className="payload-proof-content">
+                  <div className="snippet-selector">
                     {implementationSnippets.map((snippet) => (
-                      <article key={snippet.label} className="snippet-card">
-                        <p className="event-name">{snippet.label}</p>
-                        <pre className="proof-preview">{snippet.body}</pre>
-                      </article>
+                      <button
+                        key={snippet.label}
+                        type="button"
+                        className={`button button-secondary button-small ${
+                          activeImplementationSnippet.label === snippet.label ? 'tab-button-active' : ''
+                        }`}
+                        onClick={() => setSelectedSnippetLabel(snippet.label)}
+                      >
+                        {snippet.label}
+                      </button>
                     ))}
                   </div>
-                </article>
-              </aside>
+                  <article className="snippet-card">
+                    <p className="event-name">{activeImplementationSnippet.label}</p>
+                    <pre className="proof-preview">{activeImplementationSnippet.body}</pre>
+                  </article>
+                  </div>
+                ) : null}
+              </section>
             </div>
           ) : null}
 
@@ -5525,7 +5569,7 @@ if status == no-show:
                   onClick={handleInterviewMode}
                   disabled={runtimeResetPending || authStatus !== 'authenticated'}
                 >
-                  {interviewMode ? 'Interview mode active' : 'Start interview mode'}
+                  {interviewMode ? 'Demo state loaded' : 'Load demo state'}
                 </button>
               </div>
 
@@ -5563,69 +5607,30 @@ if status == no-show:
 
             <section className={`interview-band ${interviewMode ? 'interview-band-active' : ''}`}>
               <div className="interview-band-copy">
-                <p className="panel-kicker">Interview mode</p>
+                <p className="panel-kicker">Demo state</p>
                 <h2>
                   {interviewMode
-                    ? 'Guided narrative is loaded'
-                    : 'Interview walkthrough is available'}
+                    ? 'Interview-ready proof state is loaded'
+                    : 'Load the curated proof state when you need it'}
                 </h2>
                 <p className="stat-note">
                   {interviewMode
-                    ? 'Use the curated step cards to jump between the DM sprint, GHL recovery, integration evidence, revenue board, and proof pack.'
-                    : 'Launch guided mode only when you want the interview script and proof path.'}
+                    ? 'The console is reset into the curated payment-to-onboarding proof path without showing presentation cards.'
+                    : 'Use this only to load the seeded demo path. The operator console stays visible as the primary surface.'}
                 </p>
               </div>
               <div className="interview-band-actions">
-                {interviewMode ? <span className="status-pill">{activeInterviewStep.title}</span> : null}
-                {interviewMode ? (
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    onClick={() => focusInterviewStep(activeInterviewStep)}
-                    disabled={!liveConsoleReady}
-                  >
-                    Focus current step
-                  </button>
-                ) : null}
+                {interviewMode ? <span className="status-pill">Payment to onboarding autopilot</span> : null}
                 <button
                   type="button"
                   className="button button-primary button-small"
                   onClick={handleInterviewMode}
                   disabled={runtimeResetPending || authStatus !== 'authenticated'}
                 >
-                  {runtimeResetPending ? 'Loading…' : interviewMode ? 'Refresh guided mode' : 'Launch guided mode'}
+                  {runtimeResetPending ? 'Loading…' : interviewMode ? 'Reload demo state' : 'Load demo state'}
                 </button>
               </div>
             </section>
-
-            {interviewMode ? (
-              <section className="interview-step-grid" aria-label="Interview walkthrough steps">
-                {interviewGuideSteps.map((step, index) => {
-                  const isActive = activeInterviewStep.id === step.id
-                  return (
-                    <button
-                      key={step.id}
-                      type="button"
-                      className={`surface-tile interview-step-card ${isActive ? 'surface-tile-active interview-step-card-active' : ''}`}
-                      onClick={() => focusInterviewStep(step)}
-                    >
-                      <div className="section-topline">
-                        <div>
-                          <p className="mini-label">
-                            Step 0{index + 1}
-                            {isActive ? ' • active' : ''}
-                          </p>
-                          <h3>{step.title}</h3>
-                        </div>
-                        <span className="status-pill">{step.workbenchTab}</span>
-                      </div>
-                      <p className="stat-note">{step.detail}</p>
-                      <p className="timeline-meta">{step.skill}</p>
-                    </button>
-                  )
-                })}
-              </section>
-            ) : null}
           </article>
         ) : null}
 

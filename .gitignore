@@ -31,3 +31,4 @@ docs/WEEK_ONE_FOR_COBE.md
 server/data/
 server/data/runtime.json
 .gstack/
+.private/
