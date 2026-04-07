@@ -32,3 +32,4 @@ server/data/
 server/data/runtime.json
 .gstack/
 .private/
+.memd/

@@ -1,9 +1,0 @@
-MEMD_BASE_URL=http://127.0.0.1:8787
-MEMD_PROJECT=cobe-funnel-ops
-MEMD_NAMESPACE=main
-MEMD_AGENT=codex@session-a2bdc61d
-MEMD_SESSION=session-a2bdc61d
-MEMD_ROUTE=auto
-MEMD_INTENT=current_task
-MEMD_HEARTBEAT_MODEL=llama-desktop/qwen
-MEMD_AUTO_SHORT_TERM_CAPTURE=true
